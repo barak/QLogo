@@ -1,5 +1,5 @@
 qlogo (0.92-1) unstable; urgency=medium
 
-  * Initial Release
+  * Initial Release (closes: #905855)
 
  -- Barak A. Pearlmutter <bap@debian.org>  Thu, 09 Aug 2018 21:32:32 +0200

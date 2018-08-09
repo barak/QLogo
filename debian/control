@@ -7,7 +7,7 @@ Homepage: https://qlogo.org/
 Vcs-Git: https://salsa.debian.org/debian/QLogo.git
 Vcs-Browser: https://salsa.debian.org/debian/QLogo
 Build-Depends: debhelper (>= 11),
-	qtbase5-dev, qttools5-dev-tools
+	qtbase5-dev
 
 Package: qlogo
 Architecture: any
