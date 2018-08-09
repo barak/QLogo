@@ -1,0 +1,21 @@
+Source: qlogo
+Section: devel
+Priority: optional
+Maintainer: Barak A. Pearlmutter <bap@debian.org>
+Standards-Version: 4.2.0
+Homepage: https://qlogo.org/
+Vcs-Git: https://salsa.debian.org/debian/QLogo.git
+Vcs-Browser: https://salsa.debian.org/debian/QLogo
+Build-Depends: debhelper (>= 11),
+	qtbase5-dev, qttools5-dev-tools
+
+Package: qlogo
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Language using turtle graphics famous for teaching kids
+ QLogo is an interpreter for the Logo language written in C++ using
+ Qt and OpenGL. Specifically, it mimics (as reasonably as possible)
+ the UCBLogo interpreter developed at U.C. Berkeley. In fact, the
+ UCBLogo manual describes about 99.9% of the functionality. You can
+ find the UCBLogo Manual here:
+ http://people.eecs.berkeley.edu/~bh/usermanual
