@@ -42,3 +42,10 @@ html
 
 # Added by Dolphin file manager GUI
 .directory
+
+/.qmake.stash
+/Makefile
+/QLogo
+moc_*.cpp
+moc_*.h
+ui_*.h
