@@ -1,0 +1,20 @@
+#! /bin/sh -f
+
+e=/usr/bin/QLogo
+
+yes_way=false
+
+if [ ${XDG_SESSION_TYPE} = wayland ]; then
+    if [ $(dpkg --status qtwayland5 \
+	       | egrep '^Status:' \
+	       | cut --delimiter=' ' --fields=4) = installed ]; then
+	yes_way=true
+    fi
+fi
+
+
+if ${yes_way}; then
+    env QT_QPA_PLATFORM=wayland ${e} $*
+else
+    ${e} $*
+fi

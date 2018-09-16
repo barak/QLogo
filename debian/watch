@@ -1,2 +1,2 @@
 version=4
-https://github.com/jasonsikes/QLogo/tags (?:.*/)?v?(\d[\d\.]*)\.tar\.gz
+https://github.com/jasonsikes/QLogo/tags .*/v?@ANY_VERSION@@ARCHIVE_EXT@

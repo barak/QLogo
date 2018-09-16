@@ -1,0 +1,13 @@
+#! /bin/sh
+
+set -e
+
+case "$1" in
+    configure)
+        # Alternatives
+        update-alternatives --quiet \
+            --install /usr/bin/logo logo /usr/bin/QLogo 20
+        ;;
+esac
+
+#DEBHELPER#

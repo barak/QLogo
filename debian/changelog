@@ -1,3 +1,16 @@
+qlogo (0.92-2) unstable; urgency=low
+
+  * Bump to debhelper 13.
+  * Set upstream metadata fields: Bug-Database, Bug-Submit, Repository,
+    Repository-Browse.
+  * Spelling patch
+  * Tweak uscan support file debian/watch
+  * Rules do not require root
+  * Update standards version to 4.6.0, no changes needed.
+  * Provide alternative for /usr/bin/logo
+
+ -- Barak A. Pearlmutter <bap@debian.org>  Thu, 13 Jan 2022 19:51:58 +0000
+
 qlogo (0.92-1) unstable; urgency=medium
 
   * Initial Release (closes: #905855)
