@@ -27,13 +27,13 @@
 
 #include "mainwindow.h"
 #include "canvas.h"
-#include "datum.h"
-#include "qlogo_controller.h"
 #include "ui_mainwindow.h"
+#include "message.h"
 #include <QDebug>
 #include <QKeyEvent>
 #include <QScrollBar>
 #include <QTimer>
+#include <QMessageBox>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow) {
@@ -44,39 +44,144 @@ MainWindow::MainWindow(QWidget *parent)
   setWindowFlags(Qt::Window | Qt::WindowMinimizeButtonHint |
                  Qt::WindowCloseButtonHint);
 
-  ui->splitter->setSizes(QList<int>() << 200 << 200);
+  windowMode = windowMode_noWait;
+}
 
+void MainWindow::show()
+{
+  QMainWindow::show();
   ui->mainConsole->setFocus();
 
-  connect(ui->splitter, SIGNAL(splitterMoved(int, int)), mainController(),
-          SLOT(splitterMoved(int, int)), Qt::AutoConnection);
-
+  startLogo();
 }
 
-MainWindow::~MainWindow() { delete ui; }
-
-void MainWindow::show() {
-  QMainWindow::show();
-  QTimer::singleShot(0, this, &MainWindow::hideCanvas);
-}
-
-bool MainWindow::consoleHasChars() { return ui->mainConsole->charsInQueue(); }
-
-Canvas *MainWindow::mainCanvas() { return ui->mainCanvas; }
-
-Console *MainWindow::mainConsole() { return ui->mainConsole; }
-
-void MainWindow::setSplitterSizeRatios(float canvasRatio, float consoleRatio) {
-  QList<int> sizeList = ui->splitter->sizes();
-  int sum = sizeList.first() + sizeList.last(); // there are only two
-  ui->splitter->setSizes(QList<int>()
-                         << canvasRatio * sum << consoleRatio * sum);
-}
-
-void MainWindow::hideCanvas() { setSplitterSizeRatios(0, 1); }
-
-void MainWindow::closeEvent(QCloseEvent *event)
+MainWindow::~MainWindow()
 {
-    mainController()->shutdownEvent();
-    event->ignore();
+    delete ui;
+}
+
+
+int MainWindow::startLogo()
+{
+  //QString command = "/home/jsikes/Projects/build-logo-Desktop-Debug/logo"; // On my Linux
+  QString command = "/Volumes/jsikes/bin/logo"; // on my Mac
+  QStringList arguments;
+  arguments << "--QLogoGUI";
+
+  logoProcess = new QProcess(this);
+
+  logoStream.setDevice(logoProcess);
+
+  // TODO: maybe call setWorkingDirectory()
+
+  connect(logoProcess, &QProcess::started,
+          this, &MainWindow::processStarted);
+
+  connect(logoProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+          this, &MainWindow::processFinished);
+
+  connect(logoProcess, &QProcess::readyReadStandardOutput,
+          this, &MainWindow::readStandardOutput);
+
+  connect(logoProcess, &QProcess::readyReadStandardError,
+          this, &MainWindow::readStandardError);
+
+  connect(logoProcess, &QProcess::errorOccurred,
+          this, &MainWindow::errorOccurred);
+
+  connect(ui->mainConsole, &Console::sendRawlineSignal,
+          this, &MainWindow::sendRawlineSlot);
+
+  connect(ui->mainConsole, &Console::sendCharSignal,
+          this, &MainWindow::sendCharSlot);
+
+  logoProcess->start(command, arguments);
+  return 0;
+}
+
+
+
+void MainWindow::processStarted()
+{
+  qDebug() <<"ProcessStarted()";
+}
+
+
+void MainWindow::processFinished(int exitCode, QProcess::ExitStatus exitStatus)
+{
+  qDebug() <<"processFinished()" <<exitCode << exitStatus;
+
+}
+
+
+void MainWindow::readStandardOutput()
+{
+    do {
+        message_t messageType;
+        logoStream >> messageType;
+        switch(messageType)
+        {
+        case W_ZERO:
+            qDebug() <<"Zero!";
+            break;
+        case C_CONSOLE_PRINT_STRING:
+        {
+            QString text;
+            logoStream >> text;
+            ui->mainConsole->printString(text);
+            break;
+        }
+        case C_CONSOLE_REQUEST_LINE:
+            beginReadRawline();
+            break;
+        case C_CONSOLE_REQUEST_CHAR:
+            beginReadChar();
+            break;
+        default:
+            qDebug() <<"was not expecting" <<messageType;
+            break;
+
+        }
+    } while ( ! logoStream.atEnd());
+}
+
+
+void MainWindow::readStandardError()
+{
+  QByteArray ary = logoProcess->readAllStandardError();
+  qDebug() <<ary;
+//  QMessageBox msgBox;
+//  msgBox.setText(ary);
+//  msgBox.exec();
+}
+
+void MainWindow::errorOccurred(QProcess::ProcessError error)
+{
+    qDebug() <<"Error occurred" <<error;
+}
+
+
+void MainWindow::beginReadRawline()
+{
+    windowMode = windowMode_waitForRawline;
+    ui->mainConsole->requestRawline();
+}
+
+
+void MainWindow::beginReadChar()
+{
+    windowMode = windowMode_waitForChar;
+    ui->mainConsole->requestChar();
+}
+
+
+void MainWindow::sendCharSlot(QChar c)
+{
+    logoStream << (message_t)C_CONSOLE_CHAR_READ << c;
+}
+
+
+void MainWindow::sendRawlineSlot(const QString &line)
+{
+    logoStream << (message_t)C_CONSOLE_RAWLINE_READ << line;
 }

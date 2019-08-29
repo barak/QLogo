@@ -36,7 +36,8 @@
 #include "library.h"
 #include "turtle.h"
 
-#include CONTROLLER_HEADER
+#include "logocontroller.h"
+#include "qlogocontroller.h"
 
 // The maximum depth of procedure iterations before error is thrown.
 const int maxIterationDepth = 1000;
@@ -596,6 +597,12 @@ DatumP Kernel::excWait(DatumP node) {
 
 DatumP Kernel::excNoop(DatumP node) {
   ProcedureHelper h(this, node);
+  return h.ret();
+}
+
+DatumP Kernel::excErrorNoGui(DatumP node) {
+  ProcedureHelper h(this, node);
+  Error::noGraphics();
   return h.ret();
 }
 

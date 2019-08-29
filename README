@@ -1,4 +1,22 @@
-This is README for version 0.92 of QLogo
+This is README for QLogo.
+
+IMPORTANT!!!
+
+QLogo is in a state of transition. This version barely works!
+
+If you want a fully working version of QLogo source you need to checkout
+Version 0.92! You can get this either by issuing the following command in your
+local QLogo repository:
+
+$ git checkout v0.92
+
+OR, you can download QLogo Version 0.92 source on QLogo's download page:
+
+https://www.qlogo.org/download/
+
+
+==============================================================
+
 
 QLogo is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -18,10 +36,10 @@ along with QLogo.  If not, see <http://www.gnu.org/licenses/>.
 
 
 QLogo is an interpreter for the Logo language written in C++ using
-Qt and OpenGL. Specifically, it mimics (as reasonably as possible)
-the UCBLogo interpreter developed at U.C. Berkeley. In fact, the
-UCBLogo manual describes about 99.9% of the functionality. You can
-find the UCBLogo Manual here:
+Qt and OpenGL. It mimics (as much as I find reasonable) the UCBLogo
+interpreter developed at U.C. Berkeley.
+
+You can find the UCBLogo Manual here:
 
 http://people.eecs.berkeley.edu/~bh/usermanual
 
@@ -31,17 +49,18 @@ http://people.eecs.berkeley.edu/~bh/usermanual
 
 Compiling
 
-QLogo is being developed and tested to work with C++11 and Qt 5.6.3. Qt 5.6 is
-the last version to support Windows XP. However, QLogo is also being developed
-and tested against the newest version of Qt (5.10) so it can be assumed that
+QLogo is being developed and tested to work with C++11 and Qt 5.6.3. (Qt 5.6 is
+the last version to support Windows XP). However, QLogo is also being developed
+and tested against newer versions of Qt (I have 5.10) so it can be assumed that
 any version in between should work just fine.
 
 
 QLogo is currently being developed and tested on the following platforms:
 
 * Windows 10 using Visual Studio 2017 and MinGW GCC 6.3.0.
-* SUSE Tumbleweed using GCC 7.3.1
-* Mac OS X 10.13 using Clang/LLVM
+* OpenSUSE LEAP 15 using gcc 7.4.1
+* Mac OS X 10.14 using Clang/LLVM
+* Raspberry PI 3 using Raspbian
 
 
 ===============================================================
@@ -63,7 +82,8 @@ There are a few nuances:
 
 
 * Changes in font properties (size, color, family) do not affect characters
-  already printed. This enables multiple colors on the same text field.
+  already printed. This enables multiple colors and fonts on the same console,
+  but it disables any flash or strobe effect.
   
 
 
@@ -136,7 +156,7 @@ SETTEMPLOC: ...... QLogo doesn't create temporary files at this time.
 
 * The following variables have no special meaning:
 
-COMMANDLINE: ..... QLogo is a GUI application at the moment although a
+COMMANDLINE: ..... QLogo is a GUI application at the moment, although a
                    significant amount of thought is being given to make this
                    also a command-line program.
 
@@ -159,15 +179,14 @@ CURSORMODE: .... Outputs either INSERT or OVERWRITE
 
 BOUNDS: ........ Outputs a list of two numbers giving the maximum bounds (x,y)
                  of the canvas.  e.g. bounds of [350 150] means that the
-                 turtle is visible if its X coordinate is between -350 and 350
-                 and its Y coordinate is between -150 and 150. The coordinate
+                 turtle is visible if its X-coordinate is between -350 and 350
+                 and its Y-coordinate is between -150 and 150. The coordinate
                  [0, 0] is always in the center.
 
 SETBOUNDS: ..... Takes two integers and sets outer bounds of the canvas.
 
-MATRIX: ........ This exists for debugging and may be removed soon. Outputs a
+MATRIX: ........ This exists for debugging and may be removed. Outputs a
                  list of four lists, each sublist contains four numbers. This
                  is the matrix that represents the current turtle state. In
                  row-major order.
-
 
