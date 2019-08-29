@@ -1,3 +1,11 @@
+qlogo (0.92-2) unstable; urgency=medium
+
+  * Track upstream changes
+  * Bump policy
+  * Bump to dh 12
+
+ -- Barak A. Pearlmutter <bap@debian.org>  Thu, 29 Aug 2019 12:41:54 +0100
+
 qlogo (0.92-2) unstable; urgency=low
 
   * Bump to debhelper 13.
