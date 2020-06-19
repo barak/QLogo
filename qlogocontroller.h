@@ -4,12 +4,10 @@
 #include "controller.h"
 #include "message.h"
 #include <QDataStream>
+#include <QFile>
 
 class QLogoController : public Controller
 {
-    QDataStream guiInstream;
-    QFile guiIn;
-    QFile guiOut;
     message_t getMessage();
     void waitForMessage(message_t expectedType);
 
