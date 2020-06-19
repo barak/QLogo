@@ -1,18 +1,8 @@
 qlogo (0.92-3) UNRELEASED; urgency=low
 
-  * Bump debhelper from old 12 to 13.
-  * Set upstream metadata fields: Bug-Database, Bug-Submit, Repository,
-    Repository-Browse.
-
- -- Barak A. Pearlmutter <bap@debian.org>  Fri, 19 Jun 2020 15:34:57 -0000
-
-qlogo (0.92-2) unstable; urgency=medium
-
   * Track upstream changes
-  * Bump policy
-  * Bump to dh 12
 
- -- Barak A. Pearlmutter <bap@debian.org>  Thu, 29 Aug 2019 12:41:54 +0100
+ -- Barak A. Pearlmutter <bap@debian.org>  Thu, 13 Jan 2022 20:13:31 +0000
 
 qlogo (0.92-2) unstable; urgency=low
 
