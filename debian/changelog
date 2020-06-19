@@ -1,3 +1,9 @@
+qlogo (0.92-3) UNRELEASED; urgency=low
+
+  * Bump debhelper from old 12 to 13.
+
+ -- Barak A. Pearlmutter <bap@debian.org>  Fri, 19 Jun 2020 15:34:57 -0000
+
 qlogo (0.92-2) unstable; urgency=medium
 
   * Track upstream changes
