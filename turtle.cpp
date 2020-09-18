@@ -51,8 +51,10 @@ Turtle::Turtle() : matrix(QMatrix4x4()), isVisible(true), penIsDown(true) {
 Turtle::~Turtle() { _mainTurtle = NULL; }
 
 void Turtle::preTurtleMovement() {
-  if (penIsDown)
+  if (penIsDown) {
     lineStart = matrix.column(3).toVector3DAffine();
+    lineStart[3] = 1;
+    }
 }
 
 void Turtle::drawTurtleWrap() {
@@ -196,9 +198,7 @@ void Turtle::postTurtleMovement() {
     Q_ASSERT(false);
     break;
   }
-  if (!penIsDown) {
-    mainController()->updateCanvas();
-  }
+  mainController()->setTurtlePos(matrix);
 }
 
 void Turtle::drawArc(qreal angle, qreal radius) {
@@ -247,7 +247,7 @@ void Turtle::rotate(qreal angle, char axis) {
     Q_ASSERT(false);
   }
   matrix.rotate(angle, x, y, z);
-  mainController()->updateCanvas();
+  mainController()->setTurtlePos(matrix);
 }
 
 void Turtle::setxyz(qreal x, qreal y, qreal z) {
@@ -275,7 +275,7 @@ void Turtle::setMode(TurtleModeEnum newMode) {
     if ((pos.x() < -boundX) || (pos.x() > boundX) || (pos.y() < -boundY) ||
         (pos.y() > boundY)) {
       matrix.setToIdentity();
-      mainController()->updateCanvas();
+      mainController()->setTurtlePos(matrix);
     }
   }
 }
@@ -408,7 +408,7 @@ void Turtle::setScrunch(double x, double y) {
   matrix *= m;
   scrunchX = x;
   scrunchY = y;
-  mainController()->updateCanvas();
+  mainController()->setTurtlePos(matrix);
 }
 
 void Turtle::getScrunch(double &x, double &y) {

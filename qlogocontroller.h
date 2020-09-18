@@ -2,7 +2,7 @@
 #define QLOGOCONTROLLER_H
 
 #include "controller.h"
-#include "message.h"
+#include "constants.h"
 #include <QDataStream>
 #include <QFile>
 
@@ -22,6 +22,11 @@ public:
     void printToConsole(const QString &s);
     DatumP readRawlineWithPrompt(const QString &prompt);
     DatumP readchar();
+
+    void setTurtlePos(const QMatrix4x4 &newTurtlePos);
+    void drawLine(const QVector4D &start, const QVector4D &end, const QColor &color);
+    void clearScreen();
+
 };
 
 #endif // QLOGOCONTROLLER_H

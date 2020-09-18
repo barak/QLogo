@@ -24,13 +24,16 @@
 ///
 //===----------------------------------------------------------------------===//
 
+#define _USE_MATH_DEFINES
+
 #include "console.h"
-#include "message.h"
+#include "constants.h"
 #include <QDebug>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QMimeData>
 #include <QTextBlock>
+#include <math.h>
 
 Console::Console(QWidget *parent) : QTextEdit(parent) {
     consoleMode = consoleModeNoWait;

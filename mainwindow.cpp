@@ -28,24 +28,26 @@
 #include "mainwindow.h"
 #include "canvas.h"
 #include "ui_mainwindow.h"
-#include "message.h"
+#include "constants.h"
 #include <QDebug>
 #include <QKeyEvent>
 #include <QScrollBar>
 #include <QTimer>
 #include <QMessageBox>
 #include <QDir>
-
+#include <QThread>
 
 // Wrapper function for sending data to the logo interpreter
 void MainWindow::sendMessage(std::function<void (QDataStream*)> func)
 {
+    qint64 datawritten;
     QByteArray buffer;
     QDataStream bufferStream(&buffer, QIODevice::WriteOnly);
     func(&bufferStream);
-    quint32 datalen = buffer.size();
-    logoProcess->write((const char*)&datalen, sizeof(quint32));
-    logoProcess->write(buffer);
+    qint64 datalen = buffer.size();
+    buffer.prepend((const char*)&datalen, sizeof(qint64));
+    datawritten = logoProcess->write(buffer);
+    Q_ASSERT(datawritten == buffer.size());
 }
 
 
@@ -129,15 +131,17 @@ void MainWindow::readStandardOutput()
 {
     int readResult;
     do {
-        quint32 datalen;
+        qint64 datalen;
         message_t header;
         QByteArray buffer;
         QDataStream inDataStream;
-        readResult = logoProcess->read((char*)&datalen, sizeof(quint32));
-        if (readResult < 1) // TODO: We need better checks for input throughout this function.
-            break;
+        readResult = logoProcess->read((char*)&datalen, sizeof(qint64));
+        if (readResult == 0) break;
+        Q_ASSERT(readResult == sizeof(qint64));
+
         buffer.resize(datalen);
-        logoProcess->read(buffer.data(), datalen);
+        readResult = logoProcess->read(buffer.data(), datalen);
+        Q_ASSERT(readResult == (int)datalen);
         QDataStream *dataStream = new QDataStream(&buffer, QIODevice::ReadOnly);
 
         *dataStream >> header;
@@ -146,18 +150,39 @@ void MainWindow::readStandardOutput()
         case W_ZERO:
             qDebug() <<"Zero!";
             break;
-        case C_CONSOLE_PRINT_STRING:
+        case C_CONSOLE_PRINT_STRING: // 1
         {
             QString text;
             *dataStream >> text;
             ui->mainConsole->printString(text);
             break;
         }
-        case C_CONSOLE_REQUEST_LINE:
+        case C_CONSOLE_REQUEST_LINE: // 2
             beginReadRawline();
             break;
-        case C_CONSOLE_REQUEST_CHAR:
+        case C_CONSOLE_REQUEST_CHAR: // 3
             beginReadChar();
+            break;
+        case C_CANVAS_UPDATE_TURTLE_POS: // 6
+            {
+              QMatrix4x4 matrix;
+              *dataStream >> matrix;
+              ui->mainCanvas->setTurtleMatrix(matrix);
+              break;
+            }
+          case C_CANVAS_DRAW_LINE: // 7
+            {
+              QVector3D a, b;
+              QColor color;
+              *dataStream
+                  >> a
+                  >> b
+                  >> color;
+              ui->mainCanvas->addLine(a, b, color);
+              break;
+            }
+        case C_CANVAS_CLEAR_SCREEN: // 8
+            ui->mainCanvas->clearScreen();
             break;
         default:
             qDebug() <<"was not expecting" <<header;

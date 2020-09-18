@@ -71,10 +71,10 @@ public:
   QVector2D mousePos;
   QVector2D clickPos;
 
-  void drawLine(const QVector4D &, const QVector4D &, const QColor &) {}
+  virtual void drawLine(const QVector4D &, const QVector4D &, const QColor &) {}
   void drawPolygon(const QList<QVector4D> &, const QList<QColor> &) {}
   void updateCanvas(void) {}
-  void clearScreen(void) {}
+  virtual void clearScreen(void) {}
   void clearScreenText(void) {}
   void drawLabel(const QString &, const QVector4D &, const QColor &,
                  const QFont &) {}
@@ -109,6 +109,8 @@ public:
 
   void beginInputHistory() {}
   DatumP inputHistory() { return nothing; }
+
+  virtual void setTurtlePos(const QMatrix4x4 &) {}
 
   void setPenmode(PenModeEnum) {}
   void setScreenMode(ScreenModeEnum) {}
