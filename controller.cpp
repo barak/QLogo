@@ -6,7 +6,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -29,6 +29,8 @@
 
 #include <QDebug>
 
+#include <signal.h>
+
 #include "kernel.h"
 
 // For rand()
@@ -38,6 +40,42 @@
 
 #include <QFile>
 #include <QTextStream>
+#include <QApplication>
+
+SignalsEnum_t lastSignal = noSignal;
+
+// Not a part of Controller because we are handling interrupts
+static void handle_signal(int sig)
+{
+    switch(sig) {
+    case SIGINT:
+        lastSignal = toplevelSignal;
+    break;
+    case SIGTSTP:
+        lastSignal = pauseSignal;
+    break;
+    case SIGQUIT:
+        lastSignal = systemSignal;
+        break;
+    default:
+        qDebug() <<"Not expecting signal: " <<sig;
+    }
+}
+
+static void initSignals()
+{
+    signal(SIGINT, handle_signal);  // TOPLEVEL
+    signal(SIGTSTP, handle_signal); // PAUSE
+    signal(SIGQUIT, handle_signal); // SYSTEM
+}
+
+static void restoreSignals()
+{
+    signal(SIGINT, SIG_DFL);
+    signal(SIGTSTP, SIG_DFL);
+    signal(SIGQUIT, SIG_DFL);
+}
+
 
 Controller *_maincontroller = NULL;
 qreal initialBoundXY = 150;
@@ -57,6 +95,7 @@ Controller::Controller(QObject *parent) : QObject(parent) {
 }
 
 Controller::~Controller() {
+    restoreSignals();
     delete kernel;
     _maincontroller = NULL;
 }
@@ -89,8 +128,19 @@ QString Controller::addStandoutToString(const QString &src) {
 }
 
 
+SignalsEnum_t Controller::latestSignal()
+{
+    SignalsEnum_t retval = lastSignal;
+    lastSignal = noSignal;
+    return retval;
+}
+
+
 int Controller::run(void) {
   kernel->initLibrary();
+  initialize();
+
+  initSignals();
 
   bool shouldContinue = true;
   while (shouldContinue) {
@@ -98,5 +148,10 @@ int Controller::run(void) {
   }
 
   return 0;
+}
+
+void Controller::systemStop()
+{
+    QApplication::quit();
 }
 

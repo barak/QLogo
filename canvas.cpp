@@ -4,7 +4,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -194,6 +194,26 @@ void Canvas::initTurtleVBO(void) {
   t_object->release();
 }
 
+void Canvas::initLinesVBO()
+{
+    linesObject = new QOpenGLVertexArrayObject(this);
+    bool isOK = linesObject->create();
+
+    // If this fails, then I don't know what to do.
+    if ( ! isOK) {
+        qDebug() <<"Failed OpenGL init!";
+        qDebug() << "This won't work.";
+    }
+
+    linesVertexBufferObject = new QOpenGLBuffer(QOpenGLBuffer::VertexBuffer);
+    linesVertexBufferObject->create();
+    linesVertexBufferObject->setUsagePattern(QOpenGLBuffer::StaticDraw);
+
+    linesColorBufferObject = new QOpenGLBuffer(QOpenGLBuffer::VertexBuffer);
+    linesColorBufferObject->create();
+    linesColorBufferObject->setUsagePattern(QOpenGLBuffer::StaticDraw);
+}
+
 
 Canvas::Canvas(QWidget *parent) : QOpenGLWidget(parent) {
   boundsX = initialBoundX;
@@ -219,17 +239,7 @@ void Canvas::initializeGL() {
   initTurtleVBO();
   initSurfaceVBO();
   setSurfaceVertices();
-
-  linesObject = new QOpenGLVertexArrayObject(this);
-  linesObject->create(); // TODO: check return value
-
-  linesVertexBufferObject = new QOpenGLBuffer(QOpenGLBuffer::VertexBuffer);
-  linesVertexBufferObject->create();
-  linesVertexBufferObject->setUsagePattern(QOpenGLBuffer::StaticDraw);
-
-  linesColorBufferObject = new QOpenGLBuffer(QOpenGLBuffer::VertexBuffer);
-  linesColorBufferObject->create();
-  linesColorBufferObject->setUsagePattern(QOpenGLBuffer::StaticDraw);
+  initLinesVBO();
 
   shaderProgram->release();
 
@@ -271,6 +281,12 @@ void Canvas::setTurtleIsVisible(bool isVisible)
 {
   turtleIsVisible = isVisible;
   update();
+}
+
+QPointF Canvas::worldToScreen(const QVector4D &world) {
+  QVector2D pv = (world * matrix).toVector2DAffine();
+  return QPointF((pv.x() + 1) * widgetWidth / 2,
+                 widgetHeight - (pv.y() + 1) * widgetHeight / 2);
 }
 
 void Canvas::addLine(const QVector3D &vertexA, const QVector3D &vertexB, const QColor &color)
@@ -321,6 +337,63 @@ void Canvas::addLine(const QVector3D &vertexA, const QVector3D &vertexB, const Q
   }
 
   update();
+}
+
+void Canvas::addPolygon(const QList<QVector3D> &points,
+                        const QList<QColor> &colors) {
+  CanvasDrawingElement cde;
+  cde.type = canvasDrawArrayType;
+  cde.u.drawArrayElement.mode = GL_TRIANGLE_FAN;
+  cde.u.drawArrayElement.first = vertexColors.size() / 4;
+  cde.u.drawArrayElement.count = points.size();
+  drawingElementList.push_back(cde);
+
+  auto pIter = points.begin();
+  for (auto cIter = colors.begin(); cIter != colors.end(); ++cIter, ++pIter) {
+    vertices.push_back(pIter->x());
+    vertices.push_back(pIter->y());
+    vertices.push_back(pIter->z());
+    vertices.push_back(1);
+    vertexColors.push_back(cIter->red());
+    vertexColors.push_back(cIter->green());
+    vertexColors.push_back(cIter->blue());
+    vertexColors.push_back(cIter->alpha());
+  }
+
+  update();
+}
+
+void Canvas::addLabel(const QString &aText, const QVector3D &aLocation,
+                      const QColor &aColor) {
+  labels.push_back(Label(aText, aLocation, aColor, labelFont));
+  update();
+}
+
+void Canvas::setBackgroundColor(const QColor &c) {
+  backgroundColor[0] = c.redF();
+  backgroundColor[1] = c.greenF();
+  backgroundColor[2] = c.blueF();
+  backgroundColor[3] = c.alphaF();
+  setSurfaceVertices();
+  update();
+}
+
+void Canvas::setLabelFontName(const QString name)
+{
+    labelFont.setFamily(name);
+}
+
+void Canvas::setLabelFontSize(double aSize)
+{
+    labelFont.setPointSizeF(aSize);
+}
+
+void Canvas::setBounds(double x, double y)
+{
+    boundsX = x;
+    boundsY = y;
+    updateMatrix();
+    update();
 }
 
 void Canvas::resizeGL(int width, int height) {
@@ -451,6 +524,17 @@ void Canvas::paintElements() {
   linesObject->release();
 }
 
+void Canvas::paintLabels(QPainter *painter) {
+  for (QList<Label>::iterator iter = labels.begin(); iter != labels.end();
+       ++iter) {
+    Label &l = *iter;
+    QPointF p = worldToScreen(l.position);
+    painter->setPen(l.color);
+    painter->setFont(l.font);
+    painter->drawText(p, l.text);
+  }
+}
+
 
 void Canvas::paintGL() {
   QPainter painter(this);
@@ -471,7 +555,7 @@ void Canvas::paintGL() {
 
   painter.endNativePainting();
 
-  //paintLabels(&painter);
+  paintLabels(&painter);
 }
 
 void Canvas::clearScreen() {
@@ -479,7 +563,7 @@ void Canvas::clearScreen() {
 
   vertices.clear();
   vertexColors.clear();
-  //labels.clear();
+  labels.clear();
 
   setPenmode(currentPenMode);
   setPensize(currentPensize);

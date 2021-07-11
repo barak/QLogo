@@ -5,7 +5,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -183,7 +183,7 @@ DatumP Kernel::excIffalse(DatumP node) {
 // The caller is responsible for dissecting the node and acting appropriately.
 //
 
-DatumP Kernel::excStop(DatumP node) {
+DatumP Kernel:: excStop(DatumP node) {
   if (currentProcedure == nothing) {
     Error::notInsideProcedure(node.astnodeValue()->nodeName);
   }
@@ -301,7 +301,9 @@ DatumP Kernel::excError(DatumP node) {
 
 DatumP Kernel::excPause(DatumP node) {
   ProcedureHelper h(this, node);
-
+  if (currentProcedure == nothing) {
+      Error::notInsideProcedure(node.astnodeValue()->nodeName);
+  }
   return h.ret(pause());
 }
 

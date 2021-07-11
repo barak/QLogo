@@ -5,7 +5,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -57,6 +57,19 @@ void Console::printString(const QString text) {
   ensureCursorVisible();
 }
 
+void Console::setTextFontName(const QString aName)
+{
+    QFont f = textFormat.font();
+    f.setFamily(aName);
+    textFormat.setFont(f);
+}
+
+void Console::setTextFontSize(double aSize)
+{
+    QFont f = textFormat.font();
+    f.setPointSizeF(aSize);
+    textFormat.setFont(f);
+}
 
 void Console::requestRawline()
 {

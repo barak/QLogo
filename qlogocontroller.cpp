@@ -2,6 +2,7 @@
 #include <QMessageBox>
 #include <QByteArray>
 #include <QDataStream>
+#include <QApplication>
 #include <unistd.h>
 
 #ifdef _WIN32
@@ -32,10 +33,29 @@ QLogoController::QLogoController(QObject *parent) : Controller(parent)
 #endif
 }
 
+void QLogoController::systemStop()
+{
+    messageQueue.stopQueue();
+
+    qDebug() <<"We are done";
+    setDribble("");
+    QApplication::quit();
+}
+
 
 QLogoController::~QLogoController()
 {
-    setDribble("");
+
+}
+
+void QLogoController::initialize()
+{
+    messageQueue.startQueue();
+
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)W_INITIALIZE;
+    });
+    waitForMessage(W_INITIALIZE);
 
 }
 
@@ -46,20 +66,9 @@ QLogoController::~QLogoController()
  */
 message_t QLogoController::getMessage()
 {
-    qint64 datalen;
-    qint64 dataread;
     message_t header;
-    do {
-        dataread = read(STDIN_FILENO, &datalen, sizeof(qint64));
-        if (dataread == 0) {
-            QThread::msleep(100);
-        }
-    } while(dataread == 0);
-    Q_ASSERT(dataread == sizeof(qint64));
-    QByteArray buffer;
-    buffer.resize(datalen);
-    dataread = read(STDIN_FILENO, buffer.data(), datalen);
-    Q_ASSERT(dataread == datalen);
+
+    QByteArray buffer = messageQueue.getMessage();
     QDataStream bufferStream(&buffer, QIODevice::ReadOnly);
 
     bufferStream >> header;
@@ -68,6 +77,19 @@ message_t QLogoController::getMessage()
     case W_ZERO:
         qDebug() <<"ZERO!";
         break;
+    case W_INITIALIZE:
+    {
+        bufferStream >> allFontNames
+                     >> textFontName
+                     >> textFontSize
+                     >> minPensize
+                     >> maxPensize
+                     >> xbound
+                     >> ybound
+                ;
+        labelFontName = textFontName;
+        break;
+    }
     case C_CONSOLE_RAWLINE_READ:
         bufferStream >> rawLine;
         break;
@@ -103,6 +125,37 @@ void QLogoController::printToConsole(const QString &s)
     } else {
       *writeStream << s;
     }
+}
+
+void QLogoController::setTextFontName(const QString aFontName)
+{
+    if (textFontName == aFontName)
+        return;
+    // TODO: Validate font name
+    textFontName = aFontName;
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CONSOLE_SET_FONT_NAME << textFontName;
+    });
+}
+
+void QLogoController::setTextFontSize(double aSize)
+{
+    if (textFontSize == aSize)
+        return;
+    textFontSize = aSize;
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CONSOLE_SET_FONT_SIZE << textFontSize;
+    });
+}
+
+double QLogoController::getTextFontSize()
+{
+    return textFontSize;
+}
+
+const QString QLogoController::getTextFontName()
+{
+    return textFontName;
 }
 
 // TODO: I believe this is only called if the input readStream is NULL
@@ -141,17 +194,74 @@ void QLogoController::setTurtlePos(const QMatrix4x4 &newTurtlePos)
   });
 }
 
-void QLogoController::drawLine(const QVector4D &start, const QVector4D &end, const QColor &color)
+void QLogoController::drawLine(const QVector3D &start, const QVector3D &end, const QColor &startColor, const QColor &endColor)
 {
-  QVector3D s = start.toVector3DAffine();
-  QVector3D e = end.toVector3DAffine();
-
   sendMessage([&](QDataStream *out) {
     *out << (message_t)C_CANVAS_DRAW_LINE
-         << s
-         << e
-         << color;
+         << start
+         << end
+         << startColor
+         << endColor;
   });
+}
+
+void QLogoController::drawPolygon(const QList<QVector3D> &points, const QList<QColor> &colors)
+{
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CANVAS_DRAW_POLYGON
+           << points
+           << colors;
+    });
+}
+
+void QLogoController::drawLabel(const QString &aString, const QVector3D &aPosition, const QColor &aColor)
+{
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CANVAS_DRAW_LABEL
+           << aString
+           << aPosition
+           << aColor;
+    });
+}
+
+void QLogoController::setLabelFontName(const QString &aName)
+{
+    if (aName == labelFontName)
+        return;
+    labelFontName = aName;
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CANVAS_SET_FONT_NAME
+           << aName;
+    });
+}
+
+void QLogoController::setLabelFontSize(double aSize)
+{
+    if (aSize == labelFontSize)
+        return;
+    labelFontSize = aSize;
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CANVAS_SET_FONT_SIZE
+           << labelFontSize;
+    });
+}
+
+const QString QLogoController::getLabelFontName()
+{
+    return labelFontName;
+}
+
+double QLogoController::getLabelFontSize()
+{
+    return labelFontSize;
+}
+
+void QLogoController::setCanvasBackgroundColor(QColor aColor)
+{
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CANVAS_SET_BACKGROUND_COLOR
+           << aColor;
+    });
 }
 
 void QLogoController::clearScreen()
@@ -160,3 +270,33 @@ void QLogoController::clearScreen()
       *out << (message_t)C_CANVAS_CLEAR_SCREEN;
     });
 }
+
+void QLogoController::setBounds(double x, double y)
+{
+    if ((xbound == x) && (ybound == y))
+        return;
+    xbound = x;
+    ybound = y;
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CANVAS_SETBOUNDS
+           << xbound
+           << ybound;
+    });
+
+}
+
+void QLogoController::setPensize(double aSize)
+{
+    if (aSize == penSize)
+        return;
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CANVAS_SET_PENSIZE
+           << aSize;
+    });
+    penSize = aSize;
+}
+
+void QLogoController::mwait(unsigned long msecs) {
+  QThread::msleep(msecs);
+}
+

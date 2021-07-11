@@ -7,7 +7,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -32,6 +32,7 @@
 #include "procedurehelper.h"
 #include "propertylists.h"
 #include "vars.h"
+#include "constants.h"
 
 #include <QColor>
 #include <QFile>
@@ -51,12 +52,12 @@ class Kernel {
   Parser *parser;
   Vars variables;
   DatumP filePrefix;
-  QFont labelFont;
   Help help;
   long repcount = -1;
   int pauseLevel = 0;
   int procedureIterationDepth = 0;
   bool isRunningMacroResult = false;
+  bool isPausing = false;
 
   QVector<QColor> palette;
   PropertyLists plists;
@@ -111,9 +112,15 @@ class Kernel {
 
   void initPalette(void);
 
+  /// Initialize LOGO system variables
+  void initVariables(void);
+
   DatumP buildContentsList(showContents_t showWhat);
   QString createPrintoutFromContentsList(DatumP contentslist,
                                          bool shouldValidate = true);
+
+  /// Check for interrupts and handle them accordingly.
+  SignalsEnum_t interruptCheck();
 
 public:
   Kernel();
@@ -473,18 +480,6 @@ class ProcedureScope {
 public:
   ProcedureScope(Kernel *exec, DatumP procname);
   ~ProcedureScope();
-};
-
-class PauseScope {
-  int *pauseLevelStore;
-
-public:
-  PauseScope(int *pauseLevelPtr) {
-    pauseLevelStore = pauseLevelPtr;
-    ++(*pauseLevelStore);
-  }
-
-  ~PauseScope() { --(*pauseLevelStore); }
 };
 
 class StreamRedirect {

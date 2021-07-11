@@ -5,7 +5,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -164,7 +164,7 @@ bool Kernel::getLineAndRunIt(bool shouldHandleError) {
           }
           if (e->tag.wordValue()->keyValue() == "SYSTEM") {
               sysPrint("\n");
-              QApplication::quit();
+              mainController()->systemStop();
               return false;
           }
       }
@@ -200,7 +200,7 @@ DatumP Kernel::registerError(DatumP anError, bool allowErract,
       e->instructionLine = currentLine;
     }
     DatumP erractP = variables.datumForName(erract);
-    bool shouldPause =
+    bool shouldPause = (currentProcedure != nothing) &&
         (erractP != nothing) && (erractP.datumValue()->size() > 0);
 
     if (allowErract && shouldPause) {
@@ -252,6 +252,25 @@ void Kernel::initPalette() {
 
 void Kernel::initLibrary() { executeText(libraryStr); }
 
+
+// TODO: System vars need standardization
+void Kernel::initVariables(void)
+{
+    const QString logoPlatform = "LOGOPLATFORM";
+    const QString logoVersion = "LOGOVERSION";
+    const QString allowGetSet = "ALLOWGETSET";
+
+    DatumP platform(new Word(LOGOPLATFORM));
+    DatumP version(new Word(LOGOVERSION));
+    DatumP trueDatumP(&trueWord);
+    variables.setDatumForName(platform, logoPlatform);
+    variables.setDatumForName(version, logoVersion);
+    variables.setDatumForName(trueDatumP, allowGetSet);
+    variables.bury(logoPlatform);
+    variables.bury(logoVersion);
+    variables.bury(allowGetSet);
+}
+
 Kernel::Kernel() {
   readStream = NULL;
   systemReadStream = NULL;
@@ -263,19 +282,12 @@ Kernel::Kernel() {
   ProcedureHelper::setParser(parser);
   Error::setKernel(this);
 
+  initVariables();
   initPalette();
 
   filePrefix = nothing;
 
-  const QString logoPlatform = "LOGOPLATFORM";
-  const QString logoVersion = "LOGOVERSION";
-
-  DatumP platform(new Word(LOGOPLATFORM));
-  DatumP version(new Word(LOGOVERSION));
-  variables.setDatumForName(platform, logoPlatform);
-  variables.setDatumForName(version, logoVersion);
-  variables.bury(logoPlatform);
-  variables.bury(logoVersion);
+  initVariables();
 }
 
 Kernel::~Kernel() {
@@ -540,9 +552,26 @@ DatumP Kernel::executeValueOf(DatumP node) {
   return retval;
 }
 
+SignalsEnum_t Kernel::interruptCheck()
+{
+    SignalsEnum_t latestSignal = mainController()->latestSignal();
+    if (latestSignal == toplevelSignal) {
+        if (currentProcedure != nothing)
+            Error::throwError(DatumP(new Word("TOPLEVEL")), nothing);
+    } else if (latestSignal == pauseSignal) {
+        if (currentProcedure != nothing)
+            pause();
+    } else if (latestSignal == systemSignal) {
+        Error::throwError(DatumP(new Word("SYSTEM")), nothing);
+    }
+    return latestSignal;
+}
+
 DatumP Kernel::runList(DatumP listP, const QString startTag) {
   bool shouldSearchForTag = (startTag != "");
   DatumP retval;
+
+  interruptCheck();
 
   if (listP.isWord())
     listP = parser->runparse(listP);
@@ -583,40 +612,6 @@ DatumP Kernel::runList(DatumP listP, const QString startTag) {
     }
   }
 
-  // TODO: Move this to beginning of function
-  // Because it is conceivable to enter a loop where we never reach here.
-  while (!mainController()->eventQueueIsEmpty()) {
-    char event = mainController()->nextQueueEvent();
-    DatumP action;
-    switch (event) {
-    case mouseEvent: {
-      action = varBUTTONACT();
-      break;
-    }
-    case characterEvent: {
-      action = varKEYACT();
-      break;
-    }
-    case toplevelEvent: {
-      Error::throwError(DatumP(new Word("TOPLEVEL")), nothing);
-      break;
-    }
-    case systemEvent: {
-      Error::throwError(DatumP(new Word("SYSTEM")), nothing);
-      break;
-    }
-    case pauseEvent: {
-      pause();
-      break;
-    }
-    }
-    if (action != nothing) {
-      DatumP localRetval = runList(action);
-      if (localRetval != nothing)
-        Error::dontSay(localRetval);
-    }
-  }
-
   return retval;
 }
 
@@ -640,8 +635,12 @@ DatumP Kernel::excErrorNoGui(DatumP node) {
 }
 
 DatumP Kernel::pause() {
+    if (isPausing) {
+        sysPrint("Already Pausing");
+        return nothing;
+    }
   ProcedureScope procScope(this, nothing);
-  PauseScope levelScope(&pauseLevel);
+  isPausing = true;
   StreamRedirect streamScope(this, NULL, NULL);
 
   sysPrint("Pausing...\n");
@@ -656,9 +655,11 @@ DatumP Kernel::pause() {
       if ((e->code == 14) && (e->tag.wordValue()->keyValue() == "PAUSE")) {
         DatumP retval = e->output;
         registerError(nothing);
+        isPausing = false;
         return retval;
       }
       if ((e->code == 14) && (e->tag.wordValue()->keyValue() == "TOPLEVEL")) {
+          isPausing = false;
         throw e;
       }
       sysPrint(e->errorText.printValue());
@@ -666,5 +667,6 @@ DatumP Kernel::pause() {
       registerError(nothing);
     }
   }
+  isPausing = false;
   return nothing;
 }

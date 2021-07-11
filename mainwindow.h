@@ -7,7 +7,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -48,6 +48,9 @@ class MainWindow : public QMainWindow {
         windowMode_waitForRawline,
     };
 
+protected:
+    void closeEvent ( QCloseEvent * event );
+
 public:
   explicit MainWindow(QWidget *parent = 0);
   ~MainWindow();
@@ -59,11 +62,15 @@ private:
   QProcess *logoProcess;
 
   windowMode_t windowMode;
+  bool hasShownCanvas = false;
 
   int startLogo();
   void beginReadRawline();
   void beginReadChar();
   void sendMessage(std::function<void (QDataStream*)> func);
+
+  void initialize();
+  void introduceCanvas();
 
 public slots:
   void readStandardOutput();
@@ -74,6 +81,7 @@ public slots:
 
   void sendRawlineSlot(const QString &line);
   void sendCharSlot(QChar c);
+  void splitterHasMovedSlot(int, int);
 };
 
 #endif // MAINWINDOW_H
