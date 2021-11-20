@@ -2,6 +2,7 @@ qlogo (0.92-3) UNRELEASED; urgency=low
 
   * Track upstream changes
   * Transition from Qt5 to Qt6
+  * Upstream renamed README to README.md
 
  -- Barak A. Pearlmutter <bap@debian.org>  Thu, 13 Jan 2022 20:17:32 +0000
 
