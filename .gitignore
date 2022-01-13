@@ -1,5 +1,6 @@
 # Prerequisites
 *.d
+/build*
 
 # Compiled Object files
 *.slo
@@ -30,22 +31,28 @@
 *.exe
 *.out
 *.app
+QLogo
+logo
 
 # Emacs temp files
 *~
 
 Qt user files
-*.pro.user
+*.pro.user*
+CMakeLists.txt.user*
 
 # doxygen output
 html
 
-# Added by Dolphin file manager GUI
+# Added by file manager GUIs
+.DS_Store
 .directory
 
-/.qmake.stash
-/Makefile
-/QLogo
-moc_*.cpp
-moc_*.h
-ui_*.h
+# CMake-generated files
+CMakeFiles
+CMakeLists.txt.user
+Makefile
+logo_autogen
+CMakeCache.txt
+QLogo_autogen
+cmake_install.cmake

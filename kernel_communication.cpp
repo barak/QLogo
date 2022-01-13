@@ -5,7 +5,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -28,7 +28,8 @@
 #include "kernel.h"
 #include "parser.h"
 
-#include CONTROLLER_HEADER
+#include "logocontroller.h"
+#include "qlogocontroller.h"
 
 #include <QByteArray> // for SHELL
 #include <QDir>
@@ -46,7 +47,7 @@ QString Kernel::filepathForFilename(DatumP filenameP) {
     prefix = QDir::homePath();
   }
 
-  QString retval = QString("%1/%2").arg(prefix).arg(filename);
+  QString retval = QString("%1/%2").arg(prefix, filename);
   return retval;
 }
 
@@ -607,20 +608,20 @@ DatumP Kernel::excSettextcolor(DatumP node) {
 
 DatumP Kernel::excIncreasefont(DatumP node) {
   ProcedureHelper h(this, node);
-  double f = mainController()->getTextSize();
+  double f = mainController()->getTextFontSize();
   f += 2;
   // There doesn't appear to be a maximum font size.
-  mainController()->setTextSize(f);
+  mainController()->setTextFontSize(f);
   return h.ret();
 }
 
 DatumP Kernel::excDecreasefont(DatumP node) {
   ProcedureHelper h(this, node);
-  double f = mainController()->getTextSize();
+  double f = mainController()->getTextFontSize();
   f -= 2;
   if (f < 2)
     f = 2;
-  mainController()->setTextSize(f);
+  mainController()->setTextFontSize(f);
   return h.ret();
 }
 
@@ -628,26 +629,26 @@ DatumP Kernel::excSettextsize(DatumP node) {
   ProcedureHelper h(this, node);
   double newSize = h.validatedNumberAtIndex(
       0, [](double candidate) { return candidate >= 1; });
-  mainController()->setTextSize(newSize);
+  mainController()->setTextFontSize(newSize);
   return nothing;
 }
 
 DatumP Kernel::excTextsize(DatumP node) {
   ProcedureHelper h(this, node);
-  double size = mainController()->getTextSize();
+  double size = mainController()->getTextFontSize();
   return h.ret(new Word(size));
 }
 
 DatumP Kernel::excSetfont(DatumP node) {
   ProcedureHelper h(this, node);
   QString fontName = h.wordAtIndex(0).wordValue()->printValue();
-  mainController()->setFontName(fontName);
+  mainController()->setTextFontName(fontName);
   return nothing;
 }
 
 DatumP Kernel::excFont(DatumP node) {
   ProcedureHelper h(this, node);
-  QString retval = mainController()->getFontName();
+  QString retval = mainController()->getTextFontName();
   return h.ret(new Word(retval));
 }
 

@@ -7,7 +7,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -29,15 +29,10 @@
 #include <QColor>
 #include <QMatrix4x4>
 #include <map>
+#include "constants.h"
 
 #include "datum.h"
 #include <math.h>
-
-const float startingPensize = 1;
-
-enum PenModeEnum { penModePaint, penModeErase, penModeReverse };
-
-enum TurtleModeEnum { turtleWrap, turtleFence, turtleWindow };
 
 class Turtle {
   QMatrix4x4 matrix;
@@ -47,14 +42,14 @@ class Turtle {
   void drawTurtleFence();
   void drawTurtleWindow();
   QColor penColor;
-  QVector4D lineStart;
+  QVector3D lineStart;
   TurtleModeEnum mode = turtleFence;
   bool isFilling = false;
-  QList<QVector4D> fillVertices;
+  QList<QVector3D> fillVertices;
   QList<QColor> fillVertexColors;
   QColor fillColor;
   PenModeEnum penMode = penModePaint;
-  double penSize = 1;
+  double penSize = startingPensize;
 
   double scrunchX = 1;
   double scrunchY = 1;

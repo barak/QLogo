@@ -5,7 +5,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -28,7 +28,8 @@
 #include "kernel.h"
 #include "parser.h"
 
-#include CONTROLLER_HEADER
+#include "logocontroller.h"
+#include "qlogocontroller.h"
 
 QString Kernel::executeText(const QString &text) {
   QString inText = text;
@@ -212,8 +213,8 @@ QString Kernel::createPrintoutFromContentsList(DatumP contentslist,
       Error::noValue(varnameP);
     } else {
       QString line = QString("Make \"%1 %2\n")
-                         .arg(varname)
-                         .arg(parser->printoutDatum(value));
+                         .arg(varname,
+                         parser->printoutDatum(value));
       retval += line;
     }
   }
@@ -228,9 +229,9 @@ QString Kernel::createPrintoutFromContentsList(DatumP contentslist,
       DatumP nameP = j.element();
       DatumP valueP = j.element();
       QString line = QString("Pprop %1 %2 %3\n")
-                         .arg(parser->printoutDatum(listnameP))
-                         .arg(parser->printoutDatum(nameP))
-                         .arg(parser->printoutDatum(valueP));
+                         .arg(parser->printoutDatum(listnameP),
+                         parser->printoutDatum(nameP),
+                         parser->printoutDatum(valueP));
       retval += line;
     }
   }
@@ -310,9 +311,6 @@ DatumP Kernel::excTo(DatumP node) {
   if (currentProcedure != nothing) {
     Error::toInProc(node.astnodeValue()->nodeName);
   }
-  if (pauseLevel > 0) {
-    Error::toInPause(node.astnodeValue()->nodeName);
-  }
   parser->inputProcedure(node, systemReadStream);
   return nothing;
 }
@@ -370,8 +368,8 @@ DatumP Kernel::excMake(DatumP node) {
 
   if (variables.isTraced(lvalue.toUpper())) {
     QString line = QString("Make \"%1 %2\n")
-                       .arg(h.wordAtIndex(0).wordValue()->printValue())
-                       .arg(parser->unreadDatum(rvalue));
+                       .arg(h.wordAtIndex(0).wordValue()->printValue(),
+                       parser->unreadDatum(rvalue));
     sysPrint(line);
   }
 
@@ -381,13 +379,14 @@ DatumP Kernel::excMake(DatumP node) {
 DatumP Kernel::excSetfoo(DatumP node) {
   ProcedureHelper h(this, node);
 
-  QString foo = node.astnodeValue()->nodeName.wordValue()->keyValue();
+  DatumP nodeName = node.astnodeValue()->nodeName;
+  QString foo = nodeName.wordValue()->keyValue();
 
   QString lvalue = foo.right(foo.size() - 3);
   DatumP rvalue = h.datumAtIndex(0);
 
   if (!variables.doesExist(lvalue)) {
-    variables.setVarAsLocal(lvalue);
+    Error::noHow(nodeName);
   }
 
   variables.setDatumForName(rvalue, lvalue);
@@ -395,8 +394,8 @@ DatumP Kernel::excSetfoo(DatumP node) {
   if (variables.isTraced(lvalue.toUpper())) {
     QString line =
         QString("%1 %2\n")
-            .arg(node.astnodeValue()->nodeName.wordValue()->printValue())
-            .arg(parser->unreadDatum(rvalue));
+            .arg(node.astnodeValue()->nodeName.wordValue()->printValue(),
+            parser->unreadDatum(rvalue));
     sysPrint(line);
   }
 
@@ -488,9 +487,9 @@ DatumP Kernel::excPprop(DatumP node) {
   plists.addProperty(plistname, propname, value);
   if (plists.isTraced(plistname)) {
     QString line = QString("Pprop %1 %2 %3\n")
-                       .arg(parser->unreadDatum(h.datumAtIndex(0)))
-                       .arg(parser->unreadDatum(h.datumAtIndex(1)))
-                       .arg(parser->unreadDatum(value));
+                       .arg(parser->unreadDatum(h.datumAtIndex(0)),
+                        parser->unreadDatum(h.datumAtIndex(1)),
+                        parser->unreadDatum(value));
     sysPrint(line);
   }
   return nothing;
@@ -657,7 +656,7 @@ DatumP Kernel::excPot(DatumP node) {
     if (value == nothing)
       Error::noValue(varnameP);
     QString line =
-        QString("Make \"%1 %2\n").arg(varname).arg(parser->unreadDatum(value));
+        QString("Make \"%1 %2\n").arg(varname, parser->unreadDatum(value));
     stdPrint(line);
   }
 
@@ -668,8 +667,8 @@ DatumP Kernel::excPot(DatumP node) {
     DatumP proplist = plists.getPropertyList(listname);
     if (proplist.listValue()->size() > 0) {
       QString line = QString("Plist %1 = %2\n")
-                         .arg(parser->unreadDatum(listnameP))
-                         .arg(parser->unreadDatum(proplist, true));
+                         .arg(parser->unreadDatum(listnameP)
+                         ,parser->unreadDatum(proplist, true));
       stdPrint(line);
     }
   }

@@ -7,7 +7,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -28,8 +28,10 @@
 
 #include <QMainWindow>
 #include <QtGui/QOpenGLFunctions>
+#include <QProcess>
+#include <QDataStream>
+#include <functional>
 
-class Controller;
 class Canvas;
 class Console;
 
@@ -40,27 +42,46 @@ class MainWindow;
 class MainWindow : public QMainWindow {
   Q_OBJECT
 
-//  Controller *controller;
-  enum WaitingMode { notWaiting, waitingForKeypress, waitingForLine };
-  WaitingMode waitingFor;
-  void closeEvent(QCloseEvent *event) Q_DECL_OVERRIDE;
+    enum windowMode_t {
+        windowMode_noWait,
+        windowMode_waitForChar,
+        windowMode_waitForRawline,
+    };
+
+protected:
+    void closeEvent ( QCloseEvent * event );
 
 public:
   explicit MainWindow(QWidget *parent = 0);
   ~MainWindow();
-
   void show();
-  bool consoleHasChars();
-
-  Canvas *mainCanvas();
-  Console *mainConsole();
-  void setSplitterSizeRatios(float canvasRatio, float consoleRatio);
-
-public slots:
-  void hideCanvas();
 
 private:
   Ui::MainWindow *ui;
+
+  QProcess *logoProcess;
+
+  windowMode_t windowMode;
+  bool hasShownCanvas = false;
+
+  int startLogo();
+  void beginReadRawline();
+  void beginReadChar();
+  void sendMessage(std::function<void (QDataStream*)> func);
+
+  void initialize();
+  void introduceCanvas();
+
+public slots:
+  void readStandardOutput();
+  void readStandardError();
+  void processStarted();
+  void processFinished(int exitCode, QProcess::ExitStatus exitStatus);
+  void errorOccurred(QProcess::ProcessError error);
+
+  void sendRawlineSlot(const QString &line);
+  void sendCharSlot(QChar c);
+  void splitterHasMovedSlot(int, int);
 };
 
 #endif // MAINWINDOW_H

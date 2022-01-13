@@ -8,7 +8,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -316,7 +316,7 @@ Q_DECLARE_TYPEINFO(DatumP, Q_MOVABLE_TYPE);
 /// and an array of zero or more children.
 class ASTNode : public Datum {
 protected:
-  std::vector<DatumP> children;
+  QVector<DatumP> children;
 
 public:
 
@@ -475,7 +475,6 @@ public:
 /// The container for data. The QLogo List is implemented as a linked list.
 class List : public Datum {
   friend class ListIterator;
-  friend class Array; // TODO: See if we can remove this.
   friend class Parser; // Parser needs access to astList and astParseTimeStamp
 
 protected:
@@ -701,5 +700,8 @@ extern Datum notADatum;
 
 /// A pointer to notADatum, like NULL.
 extern DatumP nothing;
+
+extern Word trueWord;
+extern Word falseWord;
 
 #endif // DATUM_H

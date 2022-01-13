@@ -5,7 +5,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -42,10 +42,10 @@ Array::Array(int aOrigin, int aSize) {
 Array::Array(int aOrigin, List *source) {
   origin = aOrigin;
   array.reserve(source->size());
-  DatumP ptr = source->head;
-  while (ptr != nothing) {
-      array.push_back(ptr.listNodeValue()->item);
-      ptr = ptr.listNodeValue()->next;
+  auto iter = source->newIterator();
+
+  while (iter.elementExists()) {
+      array.push_back(iter.element());
   }
 }
 
@@ -96,40 +96,9 @@ QString Array::showValue(bool fullPrintp, int printDepthLimit,
   return "...";
 }
 
-bool Array::isEqual(DatumP other, bool ignoreCase) {
-  ArrayIterator iter;
-  ArrayIterator otherIter;
+bool Array::isEqual(DatumP other, bool) {
   Array *o = other.arrayValue();
-  int myIndex = aryVisited.indexOf(this);
-  int otherIndex = otherAryVisited.indexOf(o);
-  if (myIndex != otherIndex)
-    goto exit_false;
-
-  if (myIndex > -1)
-    return true;
-
-  if (size() != o->size())
-    goto exit_false;
-
-  iter = newIterator();
-  otherIter = o->newIterator();
-  aryVisited.push_back(this);
-  otherAryVisited.push_back(o);
-
-  while (iter.elementExists()) {
-    DatumP value = iter.element();
-    DatumP otherValue = otherIter.element();
-    if (!value.isEqual(otherValue, ignoreCase))
-      goto exit_false;
-  }
-  aryVisited.pop_back();
-  otherAryVisited.pop_back();
-  return true;
-
-exit_false:
-  aryVisited.clear();
-  otherAryVisited.clear();
-  return false;
+  return this == o;
 }
 
 int Array::size() { return array.size(); }

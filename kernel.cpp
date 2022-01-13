@@ -5,7 +5,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -36,7 +36,8 @@
 #include "library.h"
 #include "turtle.h"
 
-#include CONTROLLER_HEADER
+#include "logocontroller.h"
+#include "qlogocontroller.h"
 
 // The maximum depth of procedure iterations before error is thrown.
 const int maxIterationDepth = 1000;
@@ -79,6 +80,12 @@ StreamRedirect::~StreamRedirect() {
   exec->systemWriteStream = originalSystemWriteStream;
   exec->systemReadStream = originalSystemReadStream;
 }
+
+
+// This doesn't do anything or get called. It's just a token that gets passed
+// when GOTO is used
+DatumP Kernel::excGotoToken(DatumP) { return nothing; }
+
 
 bool Kernel::isInputRedirected() { return readStream != NULL; }
 
@@ -157,7 +164,7 @@ bool Kernel::getLineAndRunIt(bool shouldHandleError) {
           }
           if (e->tag.wordValue()->keyValue() == "SYSTEM") {
               sysPrint("\n");
-              QApplication::quit();
+              mainController()->systemStop();
               return false;
           }
       }
@@ -193,7 +200,7 @@ DatumP Kernel::registerError(DatumP anError, bool allowErract,
       e->instructionLine = currentLine;
     }
     DatumP erractP = variables.datumForName(erract);
-    bool shouldPause =
+    bool shouldPause = (currentProcedure != nothing) &&
         (erractP != nothing) && (erractP.datumValue()->size() > 0);
 
     if (allowErract && shouldPause) {
@@ -245,6 +252,25 @@ void Kernel::initPalette() {
 
 void Kernel::initLibrary() { executeText(libraryStr); }
 
+
+// TODO: System vars need standardization
+void Kernel::initVariables(void)
+{
+    const QString logoPlatform = "LOGOPLATFORM";
+    const QString logoVersion = "LOGOVERSION";
+    const QString allowGetSet = "ALLOWGETSET";
+
+    DatumP platform(new Word(LOGOPLATFORM));
+    DatumP version(new Word(LOGOVERSION));
+    DatumP trueDatumP(&trueWord);
+    variables.setDatumForName(platform, logoPlatform);
+    variables.setDatumForName(version, logoVersion);
+    variables.setDatumForName(trueDatumP, allowGetSet);
+    variables.bury(logoPlatform);
+    variables.bury(logoVersion);
+    variables.bury(allowGetSet);
+}
+
 Kernel::Kernel() {
   readStream = NULL;
   systemReadStream = NULL;
@@ -256,19 +282,12 @@ Kernel::Kernel() {
   ProcedureHelper::setParser(parser);
   Error::setKernel(this);
 
+  initVariables();
   initPalette();
 
   filePrefix = nothing;
 
-  const QString logoPlatform = "LOGOPLATFORM";
-  const QString logoVersion = "LOGOVERSION";
-
-  DatumP platform(new Word(LOGOPLATFORM));
-  DatumP version(new Word(LOGOVERSION));
-  variables.setDatumForName(platform, logoPlatform);
-  variables.setDatumForName(version, logoVersion);
-  variables.bury(logoPlatform);
-  variables.bury(logoVersion);
+  initVariables();
 }
 
 Kernel::~Kernel() {
@@ -406,7 +425,7 @@ DatumP Kernel::executeProcedureCore(DatumP node) {
       retval = runList(currentLine);
       if (retval.isASTNode()) {
         ASTNode *a = retval.astnodeValue();
-        if (a->kernel == &Kernel::excGotoCore) {
+        if (a->kernel == &Kernel::excGotoToken) {
           QString tag = a->childAtIndex(0).wordValue()->keyValue();
           DatumP startingLine = proc.procedureValue()->tagToLine[tag];
           iter =
@@ -426,7 +445,14 @@ DatumP Kernel::executeProcedureCore(DatumP node) {
   if (h.isTraced && retval.isASTNode()) {
     KernelMethod method = retval.astnodeValue()->kernel;
     if (method == &Kernel::excStop) {
-        retval = nothing;
+        if (retval.astnodeValue()->countOfChildren() > 0) {
+            retval = retval.astnodeValue()->childAtIndex(0);
+            if (retval != nothing) {
+                Error::dontSay(retval);
+            }
+        } else {
+            retval = nothing;
+        }
       } else if (method == &Kernel::excOutput) {
         DatumP p = retval.astnodeValue()->childAtIndex(0);
         KernelMethod temp_method = p.astnodeValue()->kernel;
@@ -455,7 +481,7 @@ DatumP Kernel::executeProcedure(DatumP node) {
 
   while (retval.isASTNode()) {
       KernelMethod method = retval.astnodeValue()->kernel;
-      if ((method == &Kernel::excOutput) || (method == &Kernel::excDotMaybeoutput)) {
+      if ((method == &Kernel::excOutput) || (method == &Kernel::excDotMaybeoutput) || ((method == &Kernel::excStop) && (retval.astnodeValue()->countOfChildren() > 0))) {
           if (method == &Kernel::excOutput) {
               lastOutputCmd = retval.astnodeValue();
             }
@@ -487,10 +513,24 @@ DatumP Kernel::executeProcedure(DatumP node) {
 }
 
 DatumP Kernel::executeMacro(DatumP node) {
-  DatumP retval = executeProcedure(node);
-  if (!retval.isList())
-    return Error::macroReturned(retval);
-  return runList(retval);
+    bool wasExecutingMacro = isRunningMacroResult;
+    isRunningMacroResult = true;
+    try {
+        while (node.isASTNode()) {
+            node = executeProcedure(node);
+            if (!node.isList()) {
+                isRunningMacroResult = wasExecutingMacro;
+                return Error::macroReturned(node);
+            }
+            node = runList(node);
+        }
+    } catch (Error *e) {
+        isRunningMacroResult = wasExecutingMacro;
+        throw e;
+    }
+
+    isRunningMacroResult = wasExecutingMacro;
+    return node;
 }
 
 ASTNode *Kernel::astnodeValue(DatumP caller, DatumP value) {
@@ -512,9 +552,26 @@ DatumP Kernel::executeValueOf(DatumP node) {
   return retval;
 }
 
+SignalsEnum_t Kernel::interruptCheck()
+{
+    SignalsEnum_t latestSignal = mainController()->latestSignal();
+    if (latestSignal == toplevelSignal) {
+        if (currentProcedure != nothing)
+            Error::throwError(DatumP(new Word("TOPLEVEL")), nothing);
+    } else if (latestSignal == pauseSignal) {
+        if (currentProcedure != nothing)
+            pause();
+    } else if (latestSignal == systemSignal) {
+        Error::throwError(DatumP(new Word("SYSTEM")), nothing);
+    }
+    return latestSignal;
+}
+
 DatumP Kernel::runList(DatumP listP, const QString startTag) {
   bool shouldSearchForTag = (startTag != "");
   DatumP retval;
+
+  interruptCheck();
 
   if (listP.isWord())
     listP = parser->runparse(listP);
@@ -526,15 +583,19 @@ DatumP Kernel::runList(DatumP listP, const QString startTag) {
   bool tagHasBeenFound = !shouldSearchForTag;
 
   QList<DatumP> *parsedList = parser->astFromList(listP.listValue());
-  for (auto &statement : *parsedList) {
+  for (int i = 0; i < parsedList->size(); ++i) {
     if (retval != nothing) {
       if (retval.isASTNode()) {
         return retval;
       }
       Error::dontSay(retval);
     }
+    DatumP statement = (*parsedList)[i];
     KernelMethod method = statement.astnodeValue()->kernel;
     if (tagHasBeenFound) {
+        if (isRunningMacroResult && (method == &Kernel::executeMacro) && (i == parsedList->size()-1)) {
+            return statement;
+        }
       retval = (this->*method)(statement);
     } else {
       if (method == &Kernel::excTag) {
@@ -548,38 +609,6 @@ DatumP Kernel::runList(DatumP listP, const QString startTag) {
           }
         }
       }
-    }
-  }
-
-  while (!mainController()->eventQueueIsEmpty()) {
-    char event = mainController()->nextQueueEvent();
-    DatumP action;
-    switch (event) {
-    case mouseEvent: {
-      action = varBUTTONACT();
-      break;
-    }
-    case characterEvent: {
-      action = varKEYACT();
-      break;
-    }
-    case toplevelEvent: {
-      Error::throwError(DatumP(new Word("TOPLEVEL")), nothing);
-      break;
-    }
-    case systemEvent: {
-      Error::throwError(DatumP(new Word("SYSTEM")), nothing);
-      break;
-    }
-    case pauseEvent: {
-      pause();
-      break;
-    }
-    }
-    if (action != nothing) {
-      DatumP localRetval = runList(action);
-      if (localRetval != nothing)
-        Error::dontSay(localRetval);
     }
   }
 
@@ -599,9 +628,19 @@ DatumP Kernel::excNoop(DatumP node) {
   return h.ret();
 }
 
+DatumP Kernel::excErrorNoGui(DatumP node) {
+  ProcedureHelper h(this, node);
+  Error::noGraphics();
+  return h.ret();
+}
+
 DatumP Kernel::pause() {
+    if (isPausing) {
+        sysPrint("Already Pausing");
+        return nothing;
+    }
   ProcedureScope procScope(this, nothing);
-  PauseScope levelScope(&pauseLevel);
+  isPausing = true;
   StreamRedirect streamScope(this, NULL, NULL);
 
   sysPrint("Pausing...\n");
@@ -616,9 +655,11 @@ DatumP Kernel::pause() {
       if ((e->code == 14) && (e->tag.wordValue()->keyValue() == "PAUSE")) {
         DatumP retval = e->output;
         registerError(nothing);
+        isPausing = false;
         return retval;
       }
       if ((e->code == 14) && (e->tag.wordValue()->keyValue() == "TOPLEVEL")) {
+          isPausing = false;
         throw e;
       }
       sysPrint(e->errorText.printValue());
@@ -626,5 +667,6 @@ DatumP Kernel::pause() {
       registerError(nothing);
     }
   }
+  isPausing = false;
   return nothing;
 }

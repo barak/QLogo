@@ -5,7 +5,7 @@
 //
 // QLogo is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // QLogo is distributed in the hope that it will be useful,
@@ -27,7 +27,8 @@
 #include "error.h"
 #include "kernel.h"
 
-#include CONTROLLER_HEADER
+#include "logocontroller.h"
+#include "qlogocontroller.h"
 
 #include <math.h>
 
@@ -323,8 +324,9 @@ DatumP Kernel::excFence(DatumP node) {
 
 DatumP Kernel::excBounds(DatumP node) {
   ProcedureHelper h(this, node);
-  double x, y;
-  mainController()->getBounds(x, y);
+  double x = mainController()->boundX();
+  double y = mainController()->boundY();
+
   List *retval = new List;
   retval->append(new Word(x));
   retval->append(new Word(y));
@@ -369,9 +371,8 @@ DatumP Kernel::excLabel(DatumP node) {
   QString text = h.wordAtIndex(0).wordValue()->printValue();
   double x = 0, y = 0, z = 0;
   mainTurtle()->getxyz(x, y, z);
-  QVector4D pos(x, y, z, 1);
-  mainController()->drawLabel(text, pos, mainTurtle()->getPenColor(),
-                              labelFont);
+  QVector3D pos(x, y, z);
+  mainController()->drawLabel(text, pos, mainTurtle()->getPenColor());
   return nothing;
 }
 
@@ -379,7 +380,7 @@ DatumP Kernel::excSetlabelheight(DatumP node) {
   ProcedureHelper h(this, node);
   double height = h.validatedNumberAtIndex(
       0, [](double candidate) { return candidate > 0; });
-  labelFont.setPointSizeF(height);
+  mainController()->setLabelFontSize(height);
   return nothing;
 }
 
@@ -462,7 +463,7 @@ DatumP Kernel::excTurtlemode(DatumP node) {
 
 DatumP Kernel::excLabelheight(DatumP node) {
   ProcedureHelper h(this, node);
-  double retval = labelFont.pointSizeF();
+  double retval = mainController()->getLabelFontSize();
   return h.ret(new Word(retval));
 }
 
