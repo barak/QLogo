@@ -36,7 +36,8 @@
 #include "library.h"
 #include "turtle.h"
 
-#include CONTROLLER_HEADER
+#include "logocontroller.h"
+#include "qlogocontroller.h"
 
 // The maximum depth of procedure iterations before error is thrown.
 const int maxIterationDepth = 1000;
@@ -79,6 +80,12 @@ StreamRedirect::~StreamRedirect() {
   exec->systemWriteStream = originalSystemWriteStream;
   exec->systemReadStream = originalSystemReadStream;
 }
+
+
+// This doesn't do anything or get called. It's just a token that gets passed
+// when GOTO is used
+DatumP Kernel::excGotoToken(DatumP) { return nothing; }
+
 
 bool Kernel::isInputRedirected() { return readStream != NULL; }
 
@@ -406,7 +413,7 @@ DatumP Kernel::executeProcedureCore(DatumP node) {
       retval = runList(currentLine);
       if (retval.isASTNode()) {
         ASTNode *a = retval.astnodeValue();
-        if (a->kernel == &Kernel::excGotoCore) {
+        if (a->kernel == &Kernel::excGotoToken) {
           QString tag = a->childAtIndex(0).wordValue()->keyValue();
           DatumP startingLine = proc.procedureValue()->tagToLine[tag];
           iter =
@@ -426,7 +433,14 @@ DatumP Kernel::executeProcedureCore(DatumP node) {
   if (h.isTraced && retval.isASTNode()) {
     KernelMethod method = retval.astnodeValue()->kernel;
     if (method == &Kernel::excStop) {
-        retval = nothing;
+        if (retval.astnodeValue()->countOfChildren() > 0) {
+            retval = retval.astnodeValue()->childAtIndex(0);
+            if (retval != nothing) {
+                Error::dontSay(retval);
+            }
+        } else {
+            retval = nothing;
+        }
       } else if (method == &Kernel::excOutput) {
         DatumP p = retval.astnodeValue()->childAtIndex(0);
         KernelMethod temp_method = p.astnodeValue()->kernel;
@@ -455,7 +469,7 @@ DatumP Kernel::executeProcedure(DatumP node) {
 
   while (retval.isASTNode()) {
       KernelMethod method = retval.astnodeValue()->kernel;
-      if ((method == &Kernel::excOutput) || (method == &Kernel::excDotMaybeoutput)) {
+      if ((method == &Kernel::excOutput) || (method == &Kernel::excDotMaybeoutput) || ((method == &Kernel::excStop) && (retval.astnodeValue()->countOfChildren() > 0))) {
           if (method == &Kernel::excOutput) {
               lastOutputCmd = retval.astnodeValue();
             }
@@ -487,10 +501,24 @@ DatumP Kernel::executeProcedure(DatumP node) {
 }
 
 DatumP Kernel::executeMacro(DatumP node) {
-  DatumP retval = executeProcedure(node);
-  if (!retval.isList())
-    return Error::macroReturned(retval);
-  return runList(retval);
+    bool wasExecutingMacro = isRunningMacroResult;
+    isRunningMacroResult = true;
+    try {
+        while (node.isASTNode()) {
+            node = executeProcedure(node);
+            if (!node.isList()) {
+                isRunningMacroResult = wasExecutingMacro;
+                return Error::macroReturned(node);
+            }
+            node = runList(node);
+        }
+    } catch (Error *e) {
+        isRunningMacroResult = wasExecutingMacro;
+        throw e;
+    }
+
+    isRunningMacroResult = wasExecutingMacro;
+    return node;
 }
 
 ASTNode *Kernel::astnodeValue(DatumP caller, DatumP value) {
@@ -526,15 +554,19 @@ DatumP Kernel::runList(DatumP listP, const QString startTag) {
   bool tagHasBeenFound = !shouldSearchForTag;
 
   QList<DatumP> *parsedList = parser->astFromList(listP.listValue());
-  for (auto &statement : *parsedList) {
+  for (int i = 0; i < parsedList->size(); ++i) {
     if (retval != nothing) {
       if (retval.isASTNode()) {
         return retval;
       }
       Error::dontSay(retval);
     }
+    DatumP statement = (*parsedList)[i];
     KernelMethod method = statement.astnodeValue()->kernel;
     if (tagHasBeenFound) {
+        if (isRunningMacroResult && (method == &Kernel::executeMacro) && (i == parsedList->size()-1)) {
+            return statement;
+        }
       retval = (this->*method)(statement);
     } else {
       if (method == &Kernel::excTag) {
@@ -551,6 +583,8 @@ DatumP Kernel::runList(DatumP listP, const QString startTag) {
     }
   }
 
+  // TODO: Move this to beginning of function
+  // Because it is conceivable to enter a loop where we never reach here.
   while (!mainController()->eventQueueIsEmpty()) {
     char event = mainController()->nextQueueEvent();
     DatumP action;
@@ -596,6 +630,12 @@ DatumP Kernel::excWait(DatumP node) {
 
 DatumP Kernel::excNoop(DatumP node) {
   ProcedureHelper h(this, node);
+  return h.ret();
+}
+
+DatumP Kernel::excErrorNoGui(DatumP node) {
+  ProcedureHelper h(this, node);
+  Error::noGraphics();
   return h.ret();
 }
 

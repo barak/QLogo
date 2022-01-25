@@ -25,19 +25,17 @@
 
 #define _USE_MATH_DEFINES
 
+#include "constants.h"
 #include "canvas.h"
-#include CONTROLLER_HEADER
+#include "math.h"
 
 #include <QPainter>
 #include <QtGui/QOpenGLBuffer>
 #include <QtGui/QOpenGLShaderProgram>
 #include <QtGui/QOpenGLVertexArrayObject>
 
-#include <math.h>
 
-#include "turtle.h"
-
-GLfloat lerp(float a, float b, float t) { return a * t + b * (1 - t); }
+inline GLfloat lerp(float a, float b, float t) { return a * t + b * (1 - t); }
 
 static const char *vertexShaderSource = "attribute highp vec4 posAttr;\n"
                                         "attribute lowp vec4 colAttr;\n"
@@ -53,8 +51,8 @@ static const char *fragmentShaderSource = "varying lowp vec4 col;"
                                           "   gl_FragColor = col;\n"
                                           "}\n";
 
-// The height of the turtle. All other turtle vertices are derived from this.
-const GLfloat turtleHeight = 15;
+// The length of the turtle. All other turtle vertices are derived from this.
+const GLfloat turtleLength = 15;
 
 void Canvas::initSurfaceVBO() {
   surfaceArrayObject = new QOpenGLVertexArrayObject(this);
@@ -81,7 +79,7 @@ void Canvas::initSurfaceVBO() {
 #define T_FLIPPER_JOINT .5f, .4f, .4f, 1
 
 void Canvas::initTurtleVBO(void) {
-  const GLfloat u = turtleHeight;      // height of turtle
+  const GLfloat u = turtleLength;      // length of turtle
   const GLfloat sr = u * 0.33333f;     // shell radius
   const float a = (float)M_PI * 2 / 5; // shell tile inner angle
   const GLfloat he = 1.2f;             // head side proportion from neck
@@ -196,6 +194,7 @@ void Canvas::initTurtleVBO(void) {
   t_object->release();
 }
 
+
 Canvas::Canvas(QWidget *parent) : QOpenGLWidget(parent) {
   boundsX = initialBoundX;
   boundsY = initialBoundY;
@@ -203,6 +202,8 @@ Canvas::Canvas(QWidget *parent) : QOpenGLWidget(parent) {
   backgroundColor[1] = 0;
   backgroundColor[2] = 0;
   backgroundColor[3] = 1;
+  turtleMatrix.setToIdentity();
+  turtleIsVisible = true;
 }
 
 void Canvas::initializeGL() {
@@ -259,6 +260,69 @@ void Canvas::updateMatrix() {
   invertedMatrix = matrix.inverted();
 }
 
+void Canvas::setTurtleMatrix(const QMatrix4x4 &matrix)
+{
+  turtleMatrix = matrix;
+  update();
+}
+
+
+void Canvas::setTurtleIsVisible(bool isVisible)
+{
+  turtleIsVisible = isVisible;
+  update();
+}
+
+void Canvas::addLine(const QVector3D &vertexA, const QVector3D &vertexB, const QColor &color)
+{
+  if (drawingElementList.isEmpty() ||
+      (drawingElementList.last().type != canvasDrawArrayType) ||
+      (drawingElementList.last().u.drawArrayElement.mode != GL_LINES)) {
+    CanvasDrawingElement cde;
+    cde.type = canvasDrawArrayType;
+    cde.u.drawArrayElement.mode = GL_LINES;
+    cde.u.drawArrayElement.first = vertexColors.size() / 4;
+    cde.u.drawArrayElement.count = 0;
+    drawingElementList.push_back(cde);
+  }
+
+  drawingElementList.last().u.drawArrayElement.count += 2;
+
+  vertices.push_back(vertexA.x());
+  vertices.push_back(vertexA.y());
+  vertices.push_back(vertexA.z());
+  vertices.push_back(1);
+  if (currentPenMode == penModeReverse) {
+    vertexColors.push_back(UCHAR_MAX);
+    vertexColors.push_back(UCHAR_MAX);
+    vertexColors.push_back(UCHAR_MAX);
+    vertexColors.push_back(UCHAR_MAX);
+  } else {
+    vertexColors.push_back(color.red());
+    vertexColors.push_back(color.green());
+    vertexColors.push_back(color.blue());
+    vertexColors.push_back(color.alpha());
+  }
+
+  vertices.push_back(vertexB.x());
+  vertices.push_back(vertexB.y());
+  vertices.push_back(vertexB.z());
+  vertices.push_back(1);
+  if (currentPenMode == penModeReverse) {
+    vertexColors.push_back(UCHAR_MAX);
+    vertexColors.push_back(UCHAR_MAX);
+    vertexColors.push_back(UCHAR_MAX);
+    vertexColors.push_back(UCHAR_MAX);
+  } else {
+    vertexColors.push_back(color.red());
+    vertexColors.push_back(color.green());
+    vertexColors.push_back(color.blue());
+    vertexColors.push_back(color.alpha());
+  }
+
+  update();
+}
+
 void Canvas::resizeGL(int width, int height) {
   widgetWidth = width;
   widgetHeight = height;
@@ -267,7 +331,7 @@ void Canvas::resizeGL(int width, int height) {
 }
 
 void Canvas::paintSurface() {
-  if (isBounded) {
+  if (canvasIsBounded) {
 
     // Draw the Qt-default background color
     const QColor &bg = QWidget::palette().color(QWidget::backgroundRole());
@@ -309,7 +373,7 @@ void Canvas::paintTurtle() {
   shaderProgram->enableAttributeArray("colAttr");
   shaderProgram->setAttributeBuffer("colAttr", GL_FLOAT, 0, 4);
 
-  QMatrix4x4 t_matrix = matrix * mainTurtle()->getMatrix();
+  QMatrix4x4 t_matrix = matrix * turtleMatrix;
 
   shaderProgram->setUniformValue(matrixUniformID, t_matrix);
 
@@ -387,16 +451,6 @@ void Canvas::paintElements() {
   linesObject->release();
 }
 
-void Canvas::paintLabels(QPainter *painter) {
-  for (QList<Label>::iterator iter = labels.begin(); iter != labels.end();
-       ++iter) {
-    Label &l = *iter;
-    QPointF p = worldToScreen(l.position);
-    painter->setPen(l.color);
-    painter->setFont(l.font);
-    painter->drawText(p, l.text);
-  }
-}
 
 void Canvas::paintGL() {
   QPainter painter(this);
@@ -410,14 +464,14 @@ void Canvas::paintGL() {
   paintElements();
 
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-  if ((mainTurtle() != NULL) && (mainTurtle()->isTurtleVisible())) {
+  if (turtleIsVisible) {
     paintTurtle();
   }
   shaderProgram->release();
 
   painter.endNativePainting();
 
-  paintLabels(&painter);
+  //paintLabels(&painter);
 }
 
 void Canvas::clearScreen() {
@@ -425,162 +479,12 @@ void Canvas::clearScreen() {
 
   vertices.clear();
   vertexColors.clear();
-  labels.clear();
+  //labels.clear();
 
   setPenmode(currentPenMode);
   setPensize(currentPensize);
 
   update();
-}
-
-QPointF Canvas::worldToScreen(const QVector4D &world) {
-  QVector2D pv = (world * matrix).toVector2DAffine();
-  return QPointF((pv.x() + 1) * widgetWidth / 2,
-                 widgetHeight - (pv.y() + 1) * widgetHeight / 2);
-}
-
-// This will calculate the position on the [Z=0] - plane.
-// We will have to rethink this if we implement camera movement.
-QVector2D Canvas::screenToWorld(const QPointF &p) {
-  QPointF q(2 * p.x() / widgetWidth - 1,
-            -2 * (p.y() - widgetHeight) / widgetHeight - 1);
-  QVector4D s0(q.x(), q.y(), 0, 1);
-  QVector4D s1(q.x(), q.y(), 1, 1);
-  QVector3D p0 = (s0 * invertedMatrix).toVector3DAffine();
-  QVector3D p1 = (s1 * invertedMatrix).toVector3DAffine();
-  float u = -p0.z() / (p1.z() - p0.z());
-  return QVector2D(p0.x() + u * (p1.x() - p0.x()),
-                   p0.y() + u * (p1.y() - p0.y()));
-}
-
-void Canvas::addLine(const QVector4D &vertexA, const QVector4D &vertexB,
-                     const QColor &color) {
-  if (drawingElementList.isEmpty() ||
-      (drawingElementList.last().type != canvasDrawArrayType) ||
-      (drawingElementList.last().u.drawArrayElement.mode != GL_LINES)) {
-    CanvasDrawingElement cde;
-    cde.type = canvasDrawArrayType;
-    cde.u.drawArrayElement.mode = GL_LINES;
-    cde.u.drawArrayElement.first = vertexColors.size() / 4;
-    cde.u.drawArrayElement.count = 0;
-    drawingElementList.push_back(cde);
-  }
-
-  drawingElementList.last().u.drawArrayElement.count += 2;
-
-  vertices.push_back(vertexA.x());
-  vertices.push_back(vertexA.y());
-  vertices.push_back(vertexA.z());
-  vertices.push_back(1);
-  if (currentPenMode == penModeReverse) {
-    vertexColors.push_back(UCHAR_MAX);
-    vertexColors.push_back(UCHAR_MAX);
-    vertexColors.push_back(UCHAR_MAX);
-    vertexColors.push_back(UCHAR_MAX);
-  } else {
-    vertexColors.push_back(color.red());
-    vertexColors.push_back(color.green());
-    vertexColors.push_back(color.blue());
-    vertexColors.push_back(color.alpha());
-  }
-
-  vertices.push_back(vertexB.x());
-  vertices.push_back(vertexB.y());
-  vertices.push_back(vertexB.z());
-  vertices.push_back(1);
-  if (currentPenMode == penModeReverse) {
-    vertexColors.push_back(UCHAR_MAX);
-    vertexColors.push_back(UCHAR_MAX);
-    vertexColors.push_back(UCHAR_MAX);
-    vertexColors.push_back(UCHAR_MAX);
-  } else {
-    vertexColors.push_back(color.red());
-    vertexColors.push_back(color.green());
-    vertexColors.push_back(color.blue());
-    vertexColors.push_back(color.alpha());
-  }
-
-  update();
-}
-
-void Canvas::addPolygon(const QList<QVector4D> &points,
-                        const QList<QColor> &colors) {
-  CanvasDrawingElement cde;
-  cde.type = canvasDrawArrayType;
-  cde.u.drawArrayElement.mode = GL_TRIANGLE_FAN;
-  cde.u.drawArrayElement.first = vertexColors.size() / 4;
-  cde.u.drawArrayElement.count = points.size();
-  drawingElementList.push_back(cde);
-
-  auto pIter = points.begin();
-  for (auto cIter = colors.begin(); cIter != colors.end(); ++cIter) {
-    vertices.push_back(pIter->x());
-    vertices.push_back(pIter->y());
-    vertices.push_back(pIter->z());
-    vertices.push_back(1);
-    vertexColors.push_back(cIter->red());
-    vertexColors.push_back(cIter->green());
-    vertexColors.push_back(cIter->blue());
-    vertexColors.push_back(cIter->alpha());
-    ++pIter;
-  }
-
-  update();
-}
-
-void Canvas::setPenmode(PenModeEnum newMode) {
-  currentPenMode = newMode;
-  if (drawingElementList.isEmpty() ||
-      (drawingElementList.last().type != canvasDrawSetPenmodeType)) {
-    CanvasDrawingElement cde;
-    cde.type = canvasDrawSetPenmodeType;
-    cde.u.penmodeElement.penMode = newMode;
-    drawingElementList.push_back(cde);
-  } else {
-    drawingElementList.last().u.penmodeElement.penMode = newMode;
-  }
-}
-
-void Canvas::setPensize(GLfloat aSize) {
-  currentPensize = aSize;
-  if (drawingElementList.isEmpty() ||
-      (drawingElementList.last().type != canvasDrawSetPensizeType)) {
-    CanvasDrawingElement cde;
-    cde.type = canvasDrawSetPensizeType;
-    cde.u.pensizeElement.width = aSize;
-    drawingElementList.push_back(cde);
-  } else {
-    drawingElementList.last().u.pensizeElement.width = aSize;
-  }
-}
-
-bool Canvas::isPenSizeValid(GLfloat aSize) {
-  return ((aSize >= pensizeRange[0]) && (aSize <= pensizeRange[1]));
-}
-
-QImage Canvas::getImage() { return grabFramebuffer(); }
-
-void Canvas::getBounds(qreal &xMax, qreal &yMax) {
-  xMax = boundsX;
-  yMax = boundsY;
-}
-
-void Canvas::setBounds(qreal xMax, qreal yMax) {
-  boundsX = xMax;
-  boundsY = yMax;
-
-  updateMatrix();
-  setSurfaceVertices();
-  update();
-}
-
-bool Canvas::getIsBounded() { return isBounded; }
-
-void Canvas::setIsBounded(bool aIsBounded) {
-  if (isBounded != aIsBounded) {
-    isBounded = aIsBounded;
-    update();
-  }
 }
 
 void Canvas::setSurfaceVertices() {
@@ -614,37 +518,30 @@ void Canvas::setSurfaceVertices() {
   surfaceColorBufferObject->release();
 }
 
-void Canvas::addLabel(const QString &aText, const QVector4D &aLocation,
-                      const QColor &aColor, const QFont &aFont) {
-  labels.push_back(Label(aText, aLocation, aColor, aFont));
-  update();
+
+void Canvas::setPenmode(PenModeEnum newMode) {
+  currentPenMode = newMode;
+  if (drawingElementList.isEmpty() ||
+      (drawingElementList.last().type != canvasDrawSetPenmodeType)) {
+    CanvasDrawingElement cde;
+    cde.type = canvasDrawSetPenmodeType;
+    cde.u.penmodeElement.penMode = newMode;
+    drawingElementList.push_back(cde);
+  } else {
+    drawingElementList.last().u.penmodeElement.penMode = newMode;
+  }
 }
 
-void Canvas::setBackgroundColor(const QColor &c) {
-  backgroundColor[0] = c.redF();
-  backgroundColor[1] = c.greenF();
-  backgroundColor[2] = c.blueF();
-  backgroundColor[3] = c.alphaF();
-  setSurfaceVertices();
-  update();
+void Canvas::setPensize(GLfloat aSize) {
+  currentPensize = aSize;
+  if (drawingElementList.isEmpty() ||
+      (drawingElementList.last().type != canvasDrawSetPensizeType)) {
+    CanvasDrawingElement cde;
+    cde.type = canvasDrawSetPensizeType;
+    cde.u.pensizeElement.width = aSize;
+    drawingElementList.push_back(cde);
+  } else {
+    drawingElementList.last().u.pensizeElement.width = aSize;
+  }
 }
 
-void Canvas::mousePressEvent(QMouseEvent *event) {
-  mainController()->clickPos = screenToWorld(event->localPos());
-  mainController()->setIsMouseButtonDown(true);
-  Qt::MouseButton button = event->button();
-  if (button & Qt::MidButton)
-    mainController()->setButton(3);
-  if (button & Qt::RightButton)
-    mainController()->setButton(2);
-  if (button & Qt::LeftButton)
-    mainController()->setButton(1);
-}
-
-void Canvas::mouseMoveEvent(QMouseEvent *event) {
-  mainController()->mousePos = screenToWorld(event->localPos());
-}
-
-void Canvas::mouseReleaseEvent(QMouseEvent *) {
-  mainController()->setIsMouseButtonDown(false);
-}

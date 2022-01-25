@@ -28,45 +28,51 @@
 
 #include <QTextEdit>
 
-class QMimeData;
 
 class Console : public QTextEdit {
   Q_OBJECT
 
-  enum ConsoleMode_t { inactiveMode, lineMode, charMode };
-
-  ConsoleMode_t inputMode = inactiveMode;
-  QString keyQueue;
-
-  // Line input history traversing
-  QStringList lineInputHistory;
-  int lineInputHistoryScrollingCurrentIndex;
-  void replaceLineWithHistoryIndex(int newIndex);
-
 protected:
-  int beginningOfLine = 0;
-  bool keyQueueHasChars;
-  void keyPressEvent(QKeyEvent *event) Q_DECL_OVERRIDE;
-  void insertFromMimeData(const QMimeData *source) Q_DECL_OVERRIDE;
 
-  void processLineModeKeyPressEvent(QKeyEvent *event);
-  void processCharModeKeyPressEvent(QKeyEvent *event);
+    // Key press events
+    void keyPressEvent(QKeyEvent *event) Q_DECL_OVERRIDE;
+    void processLineModeKeyPressEvent(QKeyEvent *event);
+    void processCharModeKeyPressEvent(QKeyEvent *);
+    void processNoWaitKeyPressEvent(QKeyEvent *event);
 
-  void processModeKeyPressEvent(QKeyEvent *event);
-  void dumpNextLineFromQueue();
+    enum consoleMode_t {
+        consoleModeNoWait,
+        consoleModeWaitingForChar,
+        consoleModeWaitingForRawline,
+    };
+    consoleMode_t consoleMode;
+    int beginningOfRawline;
+    int beginningOfRawlineInBlock;
 
-  void moveCursorToPos(int row, int col);
-  void returnLine(const QString line);
+    // Line input history
+    QStringList lineInputHistory;
+    int lineInputHistoryScrollingCurrentIndex;
+    void replaceLineWithHistoryIndex(int newIndex);
+
+    // Keypress and paste buffers
+    QString keyQueue;
+    void insertNextLineFromQueue();
+    void insertNextCharFromQueue();
+    void insertFromMimeData(const QMimeData *source) Q_DECL_OVERRIDE;
 
 public:
-  QTextCharFormat textFormat;
   Console(QWidget *parent = 0);
   ~Console();
-  bool charsInQueue();
-  void printString(const QString &text);
-  void requestCharacter(void);
-  void requestLineWithPrompt(const QString &prompt);
-  void getCursorPos(int &row, int &col);
+
+  QTextCharFormat textFormat;
+
+  void printString(const QString text);
+  void requestRawline();
+  void requestChar();
+
+signals:
+  void sendRawlineSignal(const QString &rawLine);
+  void sendCharSignal(QChar c);
 };
 
 #endif // CONSOLE_H

@@ -83,6 +83,7 @@ public:
   static DatumP insideRunresult(DatumP cmdName);
   static DatumP noApply(DatumP what);
   static void stackOverflow();
+  static void noGraphics();
 };
 
 #endif // ERROR_H

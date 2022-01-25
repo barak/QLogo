@@ -56,6 +56,7 @@ class Kernel {
   long repcount = -1;
   int pauseLevel = 0;
   int procedureIterationDepth = 0;
+  bool isRunningMacroResult = false;
 
   QVector<QColor> palette;
   PropertyLists plists;
@@ -435,7 +436,7 @@ public:
   DatumP excDotMaybeoutput(DatumP node);
   DatumP excTag(DatumP);
   DatumP excGoto(DatumP node);
-  DatumP excGotoCore(DatumP);
+  DatumP excGotoToken(DatumP);
 
   // TEMPLATE-BASED ITERATION
 
@@ -448,6 +449,7 @@ public:
   DatumP excMacrop(DatumP node);
 
   DatumP excNoop(DatumP node); // Some LOGO commands have no action in QLogo
+  DatumP excErrorNoGui(DatumP node); // Some LOGO commands require a GUI which might not exist
 
   // SPECIAL VARIABLES
 

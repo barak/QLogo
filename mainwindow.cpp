@@ -27,13 +27,29 @@
 
 #include "mainwindow.h"
 #include "canvas.h"
-#include "datum.h"
-#include "qlogo_controller.h"
 #include "ui_mainwindow.h"
+#include "constants.h"
 #include <QDebug>
 #include <QKeyEvent>
 #include <QScrollBar>
 #include <QTimer>
+#include <QMessageBox>
+#include <QDir>
+#include <QThread>
+
+// Wrapper function for sending data to the logo interpreter
+void MainWindow::sendMessage(std::function<void (QDataStream*)> func)
+{
+    qint64 datawritten;
+    QByteArray buffer;
+    QDataStream bufferStream(&buffer, QIODevice::WriteOnly);
+    func(&bufferStream);
+    qint64 datalen = buffer.size();
+    buffer.prepend((const char*)&datalen, sizeof(qint64));
+    datawritten = logoProcess->write(buffer);
+    Q_ASSERT(datawritten == buffer.size());
+}
+
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow) {
@@ -44,39 +60,180 @@ MainWindow::MainWindow(QWidget *parent)
   setWindowFlags(Qt::Window | Qt::WindowMinimizeButtonHint |
                  Qt::WindowCloseButtonHint);
 
-  ui->splitter->setSizes(QList<int>() << 200 << 200);
+  windowMode = windowMode_noWait;
+}
 
+void MainWindow::show()
+{
+  QMainWindow::show();
   ui->mainConsole->setFocus();
 
-  connect(ui->splitter, SIGNAL(splitterMoved(int, int)), mainController(),
-          SLOT(splitterMoved(int, int)), Qt::AutoConnection);
-
+  startLogo();
 }
 
-MainWindow::~MainWindow() { delete ui; }
-
-void MainWindow::show() {
-  QMainWindow::show();
-  QTimer::singleShot(0, this, &MainWindow::hideCanvas);
-}
-
-bool MainWindow::consoleHasChars() { return ui->mainConsole->charsInQueue(); }
-
-Canvas *MainWindow::mainCanvas() { return ui->mainCanvas; }
-
-Console *MainWindow::mainConsole() { return ui->mainConsole; }
-
-void MainWindow::setSplitterSizeRatios(float canvasRatio, float consoleRatio) {
-  QList<int> sizeList = ui->splitter->sizes();
-  int sum = sizeList.first() + sizeList.last(); // there are only two
-  ui->splitter->setSizes(QList<int>()
-                         << canvasRatio * sum << consoleRatio * sum);
-}
-
-void MainWindow::hideCanvas() { setSplitterSizeRatios(0, 1); }
-
-void MainWindow::closeEvent(QCloseEvent *event)
+MainWindow::~MainWindow()
 {
-    mainController()->shutdownEvent();
-    event->ignore();
+    delete ui;
+}
+
+
+int MainWindow::startLogo()
+{
+  QString command = QCoreApplication::applicationDirPath().append("/logo");
+  QStringList arguments;
+  arguments << "--QLogoGUI";
+
+  logoProcess = new QProcess(this);
+
+  // TODO: maybe call setWorkingDirectory()
+
+  connect(logoProcess, &QProcess::started,
+          this, &MainWindow::processStarted);
+
+  connect(logoProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+          this, &MainWindow::processFinished);
+
+  connect(logoProcess, &QProcess::readyReadStandardOutput,
+          this, &MainWindow::readStandardOutput);
+
+  connect(logoProcess, &QProcess::readyReadStandardError,
+          this, &MainWindow::readStandardError);
+
+  connect(logoProcess, &QProcess::errorOccurred,
+          this, &MainWindow::errorOccurred);
+
+  connect(ui->mainConsole, &Console::sendRawlineSignal,
+          this, &MainWindow::sendRawlineSlot);
+
+  connect(ui->mainConsole, &Console::sendCharSignal,
+          this, &MainWindow::sendCharSlot);
+
+  logoProcess->start(command, arguments);
+  return 0;
+}
+
+
+
+void MainWindow::processStarted()
+{
+  qDebug() <<"ProcessStarted()";
+}
+
+
+void MainWindow::processFinished(int exitCode, QProcess::ExitStatus exitStatus)
+{
+  qDebug() <<"processFinished()" <<exitCode << exitStatus;
+
+}
+
+// TODO: rename this. It sounds confusing.
+void MainWindow::readStandardOutput()
+{
+    int readResult;
+    do {
+        qint64 datalen;
+        message_t header;
+        QByteArray buffer;
+        QDataStream inDataStream;
+        readResult = logoProcess->read((char*)&datalen, sizeof(qint64));
+        if (readResult == 0) break;
+        Q_ASSERT(readResult == sizeof(qint64));
+
+        buffer.resize(datalen);
+        readResult = logoProcess->read(buffer.data(), datalen);
+        Q_ASSERT(readResult == (int)datalen);
+        QDataStream *dataStream = new QDataStream(&buffer, QIODevice::ReadOnly);
+
+        *dataStream >> header;
+        switch(header)
+        {
+        case W_ZERO:
+            qDebug() <<"Zero!";
+            break;
+        case C_CONSOLE_PRINT_STRING: // 1
+        {
+            QString text;
+            *dataStream >> text;
+            ui->mainConsole->printString(text);
+            break;
+        }
+        case C_CONSOLE_REQUEST_LINE: // 2
+            beginReadRawline();
+            break;
+        case C_CONSOLE_REQUEST_CHAR: // 3
+            beginReadChar();
+            break;
+        case C_CANVAS_UPDATE_TURTLE_POS: // 6
+            {
+              QMatrix4x4 matrix;
+              *dataStream >> matrix;
+              ui->mainCanvas->setTurtleMatrix(matrix);
+              break;
+            }
+          case C_CANVAS_DRAW_LINE: // 7
+            {
+              QVector3D a, b;
+              QColor color;
+              *dataStream
+                  >> a
+                  >> b
+                  >> color;
+              ui->mainCanvas->addLine(a, b, color);
+              break;
+            }
+        case C_CANVAS_CLEAR_SCREEN: // 8
+            ui->mainCanvas->clearScreen();
+            break;
+        default:
+            qDebug() <<"was not expecting" <<header;
+            break;
+
+        }
+        delete dataStream;
+    } while (1);
+}
+
+
+void MainWindow::readStandardError()
+{
+    QByteArray ary = logoProcess->readAllStandardError();
+    qDebug() <<"stderr: " <<ary;
+//  QMessageBox msgBox;
+//  msgBox.setText(ary);
+//  msgBox.exec();
+}
+
+void MainWindow::errorOccurred(QProcess::ProcessError error)
+{
+    qDebug() <<"Error occurred" <<error;
+}
+
+
+void MainWindow::beginReadRawline()
+{
+    windowMode = windowMode_waitForRawline;
+    ui->mainConsole->requestRawline();
+}
+
+
+void MainWindow::beginReadChar()
+{
+    windowMode = windowMode_waitForChar;
+    ui->mainConsole->requestChar();
+}
+
+
+void MainWindow::sendCharSlot(QChar c)
+{
+    sendMessage([&](QDataStream *out) {
+        *out << (message_t)C_CONSOLE_CHAR_READ << c;
+    });
+}
+
+
+void MainWindow::sendRawlineSlot(const QString &line)
+{
+    sendMessage([&](QDataStream *out) {
+        *out << (message_t)C_CONSOLE_RAWLINE_READ << line;
+    });
 }

@@ -190,6 +190,11 @@ void Error::notOpen(DatumP what) {
 
 void Error::alreadyFilling() {
   QString message = "Already filling";
+  mainKernel->registerError(new Error(45, message), true);
+}
+
+void Error::noGraphics() {
+  QString message = "Graphics not initialized";
   mainKernel->registerError(new Error(28, message), true);
 }
 

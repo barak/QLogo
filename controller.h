@@ -1,5 +1,5 @@
 
-//===-- qlogo/test_controller.h - Controller class definition -------*- C++
+//===-- qlogo/logo_controller.h - Controller class definition -------*- C++
 //-*-===//
 //
 // This file is part of QLogo.
@@ -57,32 +57,29 @@ enum ScreenModeEnum {
 class Controller : public QObject {
   Q_OBJECT
 
-  QTextStream *readStream;
-  QTextStream *writeStream;
-
 public:
   Controller(QObject *parent = 0);
   ~Controller();
-  DatumP readrawlineWithPrompt(const QString &);
-  DatumP readchar();
-  bool atEnd();
-  void printToConsole(const QString &s);
-  QString run(const QString &aInput);
-  void mwait(unsigned long msecs);
+  virtual DatumP readRawlineWithPrompt(const QString &) { return nothing; }
+  virtual DatumP readchar() { return nothing; }
+  virtual bool atEnd() { return true; }
+  virtual void printToConsole(const QString &) {}
+  int run(void);
+  virtual void mwait(unsigned long) {}
   const QString *editText(const QString *) { return NULL; }
 
   QVector2D mousePos;
   QVector2D clickPos;
 
-  void drawLine(const QVector4D &, const QVector4D &, const QColor &) {}
+  virtual void drawLine(const QVector4D &, const QVector4D &, const QColor &) {}
   void drawPolygon(const QList<QVector4D> &, const QList<QColor> &) {}
   void updateCanvas(void) {}
-  void clearScreen(void) {}
+  virtual void clearScreen(void) {}
   void clearScreenText(void) {}
   void drawLabel(const QString &, const QVector4D &, const QColor &,
                  const QFont &) {}
   QString addStandoutToString(const QString &src);
-  bool keyQueueHasChars();
+  virtual bool keyQueueHasChars() { return false; }
   bool setDribble(const QString &filePath);
   bool isDribbling();
   void setScrunch(double, double) {}
@@ -113,6 +110,8 @@ public:
   void beginInputHistory() {}
   DatumP inputHistory() { return nothing; }
 
+  virtual void setTurtlePos(const QMatrix4x4 &) {}
+
   void setPenmode(PenModeEnum) {}
   void setScreenMode(ScreenModeEnum) {}
   ScreenModeEnum getScreenMode() { return textScreenMode; }
@@ -131,8 +130,9 @@ protected:
   qreal boundsX = 150;
   qreal boundsY = 150;
 
-  QTextStream *inStream;
-  QTextStream *outStream;
+  QTextStream *readStream;
+  QTextStream *writeStream;
+
   QTextStream *dribbleStream;
 };
 

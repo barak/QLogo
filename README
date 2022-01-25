@@ -1,4 +1,22 @@
-This is README for version 0.92 of QLogo
+This is README for QLogo.
+
+IMPORTANT!!!
+
+QLogo is in a state of transition. This version barely works!
+
+If you want a fully working version of QLogo source you need to checkout
+Version 0.92! You can get this either by issuing the following command in your
+local QLogo repository:
+
+$ git checkout v0.92
+
+OR, you can download QLogo Version 0.92 source on QLogo's download page:
+
+https://www.qlogo.org/download/
+
+
+==============================================================
+
 
 QLogo is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -18,31 +36,47 @@ along with QLogo.  If not, see <http://www.gnu.org/licenses/>.
 
 
 QLogo is an interpreter for the Logo language written in C++ using
-Qt and OpenGL. Specifically, it mimics (as reasonably as possible)
-the UCBLogo interpreter developed at U.C. Berkeley. In fact, the
-UCBLogo manual describes about 99.9% of the functionality. You can
-find the UCBLogo Manual here:
+Qt and OpenGL. It mimics (as much as I find reasonable) the UCBLogo
+interpreter developed by Brian Harvey at U.C. Berkeley.
+
+You can find the UCBLogo Manual here:
 
 http://people.eecs.berkeley.edu/~bh/usermanual
 
+The differences between QLogo and UCBLogo are described in the
+"nuances" section below.
 
 ==============================================================
 
 
 Compiling
 
-QLogo is being developed and tested to work with C++11 and Qt 5.6.3. Qt 5.6 is
-the last version to support Windows XP. However, QLogo is also being developed
-and tested against the newest version of Qt (5.10) so it can be assumed that
-any version in between should work just fine.
+QLogo is being developed and tested to work with C++11 and Qt 5.9 and 5.15 so it
+can be assumed that any version in between should work just fine. It is my hope
+to get this compiled and working on Windows XP which means Qt 5.6.
 
 
 QLogo is currently being developed and tested on the following platforms:
 
-* Windows 10 using Visual Studio 2017 and MinGW GCC 6.3.0.
-* SUSE Tumbleweed using GCC 7.3.1
-* Mac OS X 10.13 using Clang/LLVM
+* Windows 10 using gcc 8.1.0
+* OpenSUSE LEAP 15.2 using gcc 7.5.0
+* Mac OS X 11.3 using Clang 12.0.5
 
+To build:
+
+$ cmake CMakeLists.txt
+
+$ make
+
+This will give you two executables:
+
+1. "logo": this is the Logo interpreter that can be run from the command line.
+
+2. "QLogo": this is the graphical user interface that runs logo and gives you
+the turtle. (The turtle is one of the many things that's broken right now, but
+when it works again this is where you'll find it.)
+
+There is no "make install" step yet.
 
 ===============================================================
 
@@ -57,13 +91,14 @@ There are a few nuances:
 2) as a list of 3 percentages, one for each of red, green, blue [0 0 0] is
    black, [100 100 100] is white
 
-3) as a named color from the X Color Database, e.g. "white or "lemonchiffon.
+3) as a named color from the X Color Database, e.g. "white" or "lemonchiffon".
    The X Color database can be found here:
    https://en.wikipedia.org/wiki/X11_color_names
 
 
 * Changes in font properties (size, color, family) do not affect characters
-  already printed. This enables multiple colors on the same text field.
+  already printed. This enables multiple colors and fonts on the same console,
+  but it disables any flash or strobe effect.
   
 
 
@@ -114,15 +149,15 @@ FILL: ............ Two reasons: One of the user interface principles was that
                    specific pixels which means that the display can change
                    dramatically depending on the size of the canvas. The other
                    reason is that the Flood Fill algorithm can slow down
-                   widnow resizing. Use FILLED instead.
+                   window resizing. Use FILLED instead.
 
 LOADPICT: ........ This will be implemented soon.
 
 EPSPICT: ......... This will be replaced by SVGPICT.
 
-CSLSLOAD: ........ No plans at the current time. 
+CSLSLOAD: ........ Not implemented yet.
 
-SETCSLSLOC: ...... No plans at the moment.
+SETCSLSLOC: ...... Not implemented yet.
 
 SETEDITOR: ....... QLogo uses a built-in editor.
 
@@ -136,7 +171,7 @@ SETTEMPLOC: ...... QLogo doesn't create temporary files at this time.
 
 * The following variables have no special meaning:
 
-COMMANDLINE: ..... QLogo is a GUI application at the moment although a
+COMMANDLINE: ..... QLogo is a GUI application at the moment, although a
                    significant amount of thought is being given to make this
                    also a command-line program.
 
@@ -159,15 +194,14 @@ CURSORMODE: .... Outputs either INSERT or OVERWRITE
 
 BOUNDS: ........ Outputs a list of two numbers giving the maximum bounds (x,y)
                  of the canvas.  e.g. bounds of [350 150] means that the
-                 turtle is visible if its X coordinate is between -350 and 350
-                 and its Y coordinate is between -150 and 150. The coordinate
+                 turtle is visible if its X-coordinate is between -350 and 350
+                 and its Y-coordinate is between -150 and 150. The coordinate
                  [0, 0] is always in the center.
 
 SETBOUNDS: ..... Takes two integers and sets outer bounds of the canvas.
 
-MATRIX: ........ This exists for debugging and may be removed soon. Outputs a
+MATRIX: ........ This exists for debugging and may be removed. Outputs a
                  list of four lists, each sublist contains four numbers. This
                  is the matrix that represents the current turtle state. In
                  row-major order.
-
 

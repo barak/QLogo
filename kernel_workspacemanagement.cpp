@@ -28,7 +28,8 @@
 #include "kernel.h"
 #include "parser.h"
 
-#include CONTROLLER_HEADER
+#include "logocontroller.h"
+#include "qlogocontroller.h"
 
 QString Kernel::executeText(const QString &text) {
   QString inText = text;
@@ -309,9 +310,6 @@ DatumP Kernel::excTo(DatumP node) {
   // is no procedurehelper here.
   if (currentProcedure != nothing) {
     Error::toInProc(node.astnodeValue()->nodeName);
-  }
-  if (pauseLevel > 0) {
-    Error::toInPause(node.astnodeValue()->nodeName);
   }
   parser->inputProcedure(node, systemReadStream);
   return nothing;

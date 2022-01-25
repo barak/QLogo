@@ -28,8 +28,10 @@
 
 #include <QMainWindow>
 #include <QtGui/QOpenGLFunctions>
+#include <QProcess>
+#include <QDataStream>
+#include <functional>
 
-class Controller;
 class Canvas;
 class Console;
 
@@ -40,27 +42,38 @@ class MainWindow;
 class MainWindow : public QMainWindow {
   Q_OBJECT
 
-//  Controller *controller;
-  enum WaitingMode { notWaiting, waitingForKeypress, waitingForLine };
-  WaitingMode waitingFor;
-  void closeEvent(QCloseEvent *event) Q_DECL_OVERRIDE;
+    enum windowMode_t {
+        windowMode_noWait,
+        windowMode_waitForChar,
+        windowMode_waitForRawline,
+    };
 
 public:
   explicit MainWindow(QWidget *parent = 0);
   ~MainWindow();
-
   void show();
-  bool consoleHasChars();
-
-  Canvas *mainCanvas();
-  Console *mainConsole();
-  void setSplitterSizeRatios(float canvasRatio, float consoleRatio);
-
-public slots:
-  void hideCanvas();
 
 private:
   Ui::MainWindow *ui;
+
+  QProcess *logoProcess;
+
+  windowMode_t windowMode;
+
+  int startLogo();
+  void beginReadRawline();
+  void beginReadChar();
+  void sendMessage(std::function<void (QDataStream*)> func);
+
+public slots:
+  void readStandardOutput();
+  void readStandardError();
+  void processStarted();
+  void processFinished(int exitCode, QProcess::ExitStatus exitStatus);
+  void errorOccurred(QProcess::ProcessError error);
+
+  void sendRawlineSlot(const QString &line);
+  void sendCharSlot(QChar c);
 };
 
 #endif // MAINWINDOW_H
