@@ -7,6 +7,8 @@ case "$1" in
         # Alternatives
         update-alternatives --quiet \
             --install /usr/bin/logo logo /usr/bin/QLogo 20
+        update-alternatives --quiet \
+            --install /usr/bin/logo logo /usr/bin/QLogo-cli 15
         ;;
 esac
 

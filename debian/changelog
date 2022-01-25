@@ -1,3 +1,14 @@
+qlogo (0.92+git.1.29a5ca2-1) unstable; urgency=medium
+
+  * Track upstream changes through 315d896 (just before Qt6 transition)
+  * Add desktop file
+  * Upstream installs executables in usr/bin itself
+  * Upstream installs non-graphical executable as /usr/bin/logo; rename to QLogo-cli
+  * Make QLogo-cli its own alternative
+  * Update packaging scripts to upstream changes
+
+ -- Barak A. Pearlmutter <bap@debian.org>  Sun, 06 Feb 2022 19:44:54 +0000
+
 qlogo (0.92-2) unstable; urgency=low
 
   * Bump to debhelper 13.

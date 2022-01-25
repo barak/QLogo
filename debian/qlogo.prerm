@@ -6,6 +6,7 @@ case "$1" in
     remove|deconfigure)
 	# Alternatives
 	update-alternatives --quiet --remove logo /usr/bin/QLogo
+	update-alternatives --quiet --remove logo /usr/bin/QLogo-cli
 	;;
 esac
 

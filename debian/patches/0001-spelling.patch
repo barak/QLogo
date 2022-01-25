@@ -7,10 +7,10 @@ Subject: spelling
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/help.cpp b/help.cpp
-index a813433..166e4cd 100644
+index 9aad118..68c8b41 100644
 --- a/help.cpp
 +++ b/help.cpp
-@@ -4270,7 +4270,7 @@ void Help::setControlStructures() {
+@@ -4271,7 +4271,7 @@ void Help::setControlStructures() {
        "member\n"
        "        of a list, or the first character of a word) for which the "
        "value\n"
@@ -19,7 +19,7 @@ index a813433..166e4cd 100644
        "its\n"
        "        slot is TRUE.  If there is no such constituent, the empty list\n"
        "        is output.\n"
-@@ -4299,7 +4299,7 @@ void Help::setControlStructures() {
+@@ -4300,7 +4300,7 @@ void Help::setControlStructures() {
        "SUM.\n"
        "        If the data input has only one constituent (member in a list "
        "or\n"
