@@ -1,3 +1,9 @@
+qlogo (0.92+git.1.29a5ca2-2) unstable; urgency=medium
+
+  * Missing build dependency on cmake
+
+ -- Barak A. Pearlmutter <bap@debian.org>  Mon, 07 Feb 2022 10:56:17 +0000
+
 qlogo (0.92+git.1.29a5ca2-1) unstable; urgency=medium
 
   * Track upstream changes through 315d896 (just before Qt6 transition)
