@@ -169,6 +169,10 @@ DatumP Kernel::excSetheading(DatumP node) {
     });
   }
   double oldHeading = mainTurtle()->getHeading(axis);
+
+  // Logo heading is positive in the clockwise direction, opposite conventional linear algebra (right-hand rule).
+  newHeading = 360 - newHeading;
+
   double adjustment = newHeading - oldHeading;
   mainTurtle()->rotate(adjustment, axis);
   return nothing;
@@ -185,6 +189,9 @@ DatumP Kernel::excArc(DatumP node) {
   ProcedureHelper h(this, node);
   double angle = h.numberAtIndex(0);
   double radius = h.numberAtIndex(1);
+
+  // Logo heading is positive in the clockwise direction, opposite conventional linear algebra (right-hand rule).
+  angle = 0 - angle;
 
   if ((angle < -360) || (angle > 360))
     angle = 360;
@@ -226,6 +233,11 @@ DatumP Kernel::excHeading(DatumP node) {
     });
   }
   double retval = mainTurtle()->getHeading(axis);
+
+  // Heading is positive in the counter-clockwise direction.
+  if (retval > 0)
+      retval = 360 - retval;
+
   return h.ret(new Word(retval));
 }
 
@@ -246,6 +258,11 @@ DatumP Kernel::excTowards(DatumP node) {
   double retval = atan2(x - v[0], v[1] - y) * (180 / M_PI);
   if (retval < 0)
     retval += 360;
+
+  // Heading is positive in the counter-clockwise direction.
+  if (retval > 0)
+      retval = 360 - retval;
+
   return h.ret(new Word(retval));
 }
 
