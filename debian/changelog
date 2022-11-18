@@ -5,8 +5,9 @@ qlogo (0.92-3) UNRELEASED; urgency=low
   * Upstream renamed README to README.md
   * Need build dependency on cmake
   * Need build dependency on libqt6opengl6-dev
+  * dh_installalternatives
 
- -- Barak A. Pearlmutter <bap@debian.org>  Mon, 08 Aug 2022 20:36:47 +0100
+ -- Barak A. Pearlmutter <bap@debian.org>  Fri, 18 Nov 2022 14:57:25 +0000
 
 qlogo (0.92-2) unstable; urgency=low
 
