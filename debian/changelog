@@ -1,4 +1,4 @@
-qlogo (0.92-3) UNRELEASED; urgency=low
+qlogo (0.94alpha3-1) UNRELEASED; urgency=medium
 
   * Track upstream changes
   * Transition from Qt5 to Qt6
@@ -6,8 +6,9 @@ qlogo (0.92-3) UNRELEASED; urgency=low
   * Need build dependency on cmake
   * Need build dependency on libqt6opengl6-dev
   * dh_installalternatives
+  * New upstream alpha release
 
- -- Barak A. Pearlmutter <bap@debian.org>  Fri, 18 Nov 2022 14:57:25 +0000
+ -- Barak A. Pearlmutter <bap@debian.org>  Tue, 20 Dec 2022 16:42:21 +0000
 
 qlogo (0.92-2) unstable; urgency=low
 
