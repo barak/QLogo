@@ -29,6 +29,7 @@
 #include "canvas.h"
 #include "ui_mainwindow.h"
 #include "constants.h"
+#include "editorwindow.h"
 #include <QDebug>
 #include <QKeyEvent>
 #include <QScrollBar>
@@ -119,6 +120,15 @@ int MainWindow::startLogo()
   connect(ui->splitter, &QSplitter::splitterMoved,
           this, &MainWindow::splitterHasMovedSlot);
 
+  connect(ui->mainCanvas, &Canvas::sendMouseclickedSignal,
+          this, &MainWindow::mouseclickedSlot);
+
+  connect(ui->mainCanvas, &Canvas::sendMousemovedSignal,
+          this, &MainWindow::mousemovedSlot);
+
+  connect(ui->mainCanvas, &Canvas::sendMouseReleasedSignal,
+          this, &MainWindow::mousereleasedSlot);
+
   logoProcess->start(command, arguments);
   return 0;
 }
@@ -146,14 +156,13 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 void MainWindow::initialize()
 {
-    QList<int> sizes;
-    sizes << 0 << 100;
     QFont defaultFont = QFontDatabase::systemFont(QFontDatabase::FixedFont);
     ui->mainConsole->setTextFontSize(defaultFont.pointSizeF());
     ui->mainConsole->setTextFontName(defaultFont.family());
     ui->mainCanvas->setLabelFontSize(defaultFont.pointSizeF());
     ui->mainCanvas->setLabelFontName(defaultFont.family());
-    ui->splitter->setSizes(sizes);
+    ui->mainCanvas->setBackgroundColor(QColor(startingColor));
+    setSplitterforMode(initScreenMode);
 
     sendMessage([&](QDataStream *out) {
         *out
@@ -165,18 +174,44 @@ void MainWindow::initialize()
         << ui->mainCanvas->maximumPenSize()
         << ui->mainCanvas->xbound()
         << ui->mainCanvas->ybound()
+        << QColor(startingColor)
            ;
     });
 
 }
 
+void MainWindow::openEditorWindow(const QString startingText)
+{
+    if (editWindow == NULL) {
+      editWindow = new EditorWindow;
+
+      connect(editWindow, SIGNAL(editingHasEndedSignal(QString)), this,
+              SLOT(editingHasEndedSlot(QString)));
+    }
+
+    editWindow->setTextFormat(ui->mainConsole->getFont());
+    editWindow->setContents(startingText);
+    editWindow->show();
+    editWindow->activateWindow();
+    editWindow->setFocus();
+}
+
+
+void MainWindow::editingHasEndedSlot(QString text)
+{
+    sendMessage([&](QDataStream *out) {
+        *out
+        << (message_t)C_CONSOLE_END_EDIT_TEXT
+        << text;
+    });
+}
+
+
 void MainWindow::introduceCanvas() {
     if (hasShownCanvas)
         return;
     hasShownCanvas = true;
-    QList<int>sizes;
-    sizes << 75 << 25;
-    ui->splitter->setSizes(sizes);
+    setSplitterforMode(splitScreenMode);
 }
 
 
@@ -230,6 +265,13 @@ void MainWindow::readStandardOutput()
             logoProcess->closeWriteChannel();
             break;
         }
+        case W_SET_SCREENMODE:
+        {
+            ScreenModeEnum newMode;
+            *dataStream >> newMode;
+            setSplitterforMode(newMode);
+            break;
+        }
         case C_CONSOLE_PRINT_STRING:
         {
             QString text;
@@ -252,16 +294,67 @@ void MainWindow::readStandardOutput()
             break;
         }
         case C_CONSOLE_REQUEST_LINE:
-            beginReadRawline();
+        {
+            QString prompt;
+            *dataStream >> prompt;
+            beginReadRawlineWithPrompt(prompt);
             break;
+        }
         case C_CONSOLE_REQUEST_CHAR:
             beginReadChar();
+            break;
+        case C_CONSOLE_BEGIN_EDIT_TEXT:
+        {
+            QString startingText;
+            *dataStream >> startingText;
+            openEditorWindow(startingText);
+            break;
+        }
+        case C_CONSOLE_TEXT_CURSOR_POS:
+        {
+            sendConsoleCursorPosition();
+            break;
+        }
+        case C_CONSOLE_SET_TEXT_CURSOR_POS:
+        {
+            int row, col;
+            *dataStream >> row
+                        >> col;
+            ui->mainConsole->setTextCursorPosition(row, col);
+            break;
+        }
+        case C_CONSOLE_SET_CURSOR_MODE:
+        {
+            bool mode;
+            *dataStream >> mode;
+            ui->mainConsole->setOverwriteMode(mode);
+            break;
+        }
+        case C_CONSOLE_SET_TEXT_COLOR:
+        {
+            QColor foreground;
+            QColor background;
+            *dataStream >> foreground
+                        >> background;
+            ui->mainConsole->setTextFontColor(foreground,background);
+            break;
+        }
+        case C_CANVAS_CLEAR_SCREEN_TEXT:
+            ui->mainConsole->setPlainText("");
             break;
         case C_CANVAS_UPDATE_TURTLE_POS:
             {
               QMatrix4x4 matrix;
               *dataStream >> matrix;
               ui->mainCanvas->setTurtleMatrix(matrix);
+              introduceCanvas();
+              break;
+            }
+        case C_CANVAS_SET_TURTLE_IS_VISIBLE:
+            {
+              bool isVisible;
+              *dataStream >> isVisible;
+              ui->mainCanvas->setTurtleIsVisible(isVisible);
               introduceCanvas();
               break;
             }
@@ -299,6 +392,13 @@ void MainWindow::readStandardOutput()
                     >> x
                     >> y;
             ui->mainCanvas->setBounds(x, y);
+            break;
+        }
+        case C_CANVAS_SET_IS_BOUNDED:
+        {
+            bool isBounded;
+            *dataStream >> isBounded;
+            ui->mainCanvas->setIsBounded(isBounded);
             break;
         }
         case C_CANVAS_SET_FONT_NAME:
@@ -344,6 +444,16 @@ void MainWindow::readStandardOutput()
             ui->mainCanvas->setPensize((GLfloat)newSize);
             break;
         }
+        case C_CANVAS_SET_PENMODE:
+            PenModeEnum newMode;
+            *dataStream >> newMode;
+            ui->mainCanvas->setPenmode(newMode);
+            break;
+        case C_CANVAS_GET_IMAGE:
+        {
+            sendCanvasImage();
+            break;
+        }
         default:
             qDebug() <<"was not expecting" <<header;
             break;
@@ -351,6 +461,31 @@ void MainWindow::readStandardOutput()
         }
         delete dataStream;
     } while (1);
+}
+
+
+void MainWindow::setSplitterforMode(ScreenModeEnum mode)
+{
+    float canvasSize, consoleSize;
+    switch (mode) {
+    case initScreenMode:
+        canvasSize = initScreenSize;
+        break;
+    case textScreenMode:
+        canvasSize = textScreenSize;
+        break;
+    case fullScreenMode:
+        canvasSize = fullScreenSize;
+        break;
+    case splitScreenMode:
+        canvasSize = splitScreenSize;
+        break;
+    }
+    QList<int>sizes = ui->splitter->sizes();
+    float splitterSize = sizes[0] + sizes[1];
+    canvasSize = canvasSize * splitterSize;
+    consoleSize = splitterSize - canvasSize;
+    ui->splitter->setSizes(QList<int>() << (int)canvasSize << (int)consoleSize);
 }
 
 
@@ -366,10 +501,10 @@ void MainWindow::errorOccurred(QProcess::ProcessError error)
 }
 
 
-void MainWindow::beginReadRawline()
+void MainWindow::beginReadRawlineWithPrompt(const QString prompt)
 {
     windowMode = windowMode_waitForRawline;
-    ui->mainConsole->requestRawline();
+    ui->mainConsole->requestRawlineWithPrompt(prompt);
 }
 
 
@@ -378,6 +513,34 @@ void MainWindow::beginReadChar()
     windowMode = windowMode_waitForChar;
     ui->mainConsole->requestChar();
 }
+
+
+void MainWindow::mouseclickedSlot(QVector2D position, int buttonID)
+{
+    sendMessage([&](QDataStream *out) {
+        *out << (message_t)C_CANVAS_MOUSE_BUTTON_DOWN
+             << position
+             << buttonID;
+    });
+}
+
+
+void MainWindow::mousemovedSlot(QVector2D position)
+{
+    sendMessage([&](QDataStream *out) {
+        *out << (message_t)C_CANVAS_MOUSE_MOVED
+             << position;
+    });
+}
+
+
+void MainWindow::mousereleasedSlot()
+{
+    sendMessage([&](QDataStream *out) {
+        *out << (message_t)C_CANVAS_MOUSE_BUTTON_UP;
+    });
+}
+
 
 
 void MainWindow::sendCharSlot(QChar c)
@@ -392,6 +555,28 @@ void MainWindow::sendRawlineSlot(const QString &line)
 {
     sendMessage([&](QDataStream *out) {
         *out << (message_t)C_CONSOLE_RAWLINE_READ << line;
+    });
+}
+
+
+void MainWindow::sendConsoleCursorPosition()
+{
+    int row = 0;
+    int col = 0;
+    ui->mainConsole->getCursorPos(row, col);
+    sendMessage([&](QDataStream *out) {
+        *out << (message_t)C_CONSOLE_TEXT_CURSOR_POS
+             << row
+             << col;
+    });
+}
+
+
+void MainWindow::sendCanvasImage()
+{
+    QImage image = ui->mainCanvas->getImage();
+    sendMessage([&](QDataStream *out) {
+        *out << (message_t)C_CANVAS_GET_IMAGE << image;
     });
 }
 

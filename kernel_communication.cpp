@@ -29,7 +29,6 @@
 #include "parser.h"
 
 #include "logocontroller.h"
-#include "qlogocontroller.h"
 
 #include <QByteArray> // for SHELL
 #include <QDir>
@@ -589,7 +588,7 @@ DatumP Kernel::excCursor(DatumP node) {
 DatumP Kernel::excSettextcolor(DatumP node) {
   ProcedureHelper h(this, node);
   QColor foreground;
-  QColor background = QColor("white");
+  QColor background;
   DatumP foregroundP =
       h.validatedDatumAtIndex(0, [&foreground, this](DatumP candidate) {
         return colorFromDatumP(foreground, candidate);
@@ -664,21 +663,20 @@ DatumP Kernel::excAllfonts(DatumP node) {
 
 DatumP Kernel::excCursorInsert(DatumP node) {
   ProcedureHelper h(this, node);
-  cursorOverwrite = false;
   mainController()->setCursorOverwriteMode(false);
   return h.ret(nothing);
 }
 
 DatumP Kernel::excCursorOverwrite(DatumP node) {
   ProcedureHelper h(this, node);
-  cursorOverwrite = true;
   mainController()->setCursorOverwriteMode(true);
   return h.ret(nothing);
 }
 
 DatumP Kernel::excCursorMode(DatumP node) {
   ProcedureHelper h(this, node);
-  QString retval = cursorOverwrite ? "OVERWRITE" : "INSERT";
+  bool mode = mainController()->cursorOverwriteMode();
+  QString retval = mode ? "OVERWRITE" : "INSERT";
   DatumP retvalP(new Word(retval));
   return h.ret(retvalP);
 }

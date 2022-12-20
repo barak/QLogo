@@ -60,6 +60,8 @@ protected:
     void insertNextCharFromQueue();
     void insertFromMimeData(const QMimeData *source) Q_DECL_OVERRIDE;
 
+    void writeTextFragment(const QString text);
+
     QTextCharFormat textFormat;
 
 public:
@@ -67,11 +69,15 @@ public:
   ~Console();
 
   void printString(const QString text);
-  void requestRawline();
+  void requestRawlineWithPrompt(const QString prompt);
   void requestChar();
 
+  void getCursorPos(int &row, int &col);
+  void setTextCursorPosition(int row, int col);
   void setTextFontName(const QString aName);
   void setTextFontSize(double aSize);
+  void setTextFontColor(QColor foreground, QColor background);
+  const QTextCharFormat getFont() { return textFormat;}
 
 signals:
   void sendRawlineSignal(const QString &rawLine);

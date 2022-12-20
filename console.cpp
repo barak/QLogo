@@ -37,12 +37,40 @@
 
 Console::Console(QWidget *parent) : QTextEdit(parent) {
     consoleMode = consoleModeNoWait;
+    textFormat.setForeground(QBrush(QWidget::palette().color(QPalette::Text)));
+    textFormat.setBackground(QBrush(QWidget::palette().color(QPalette::Base)));
 }
 
 Console::~Console() {}
 
+// Write a fragment of text
+void Console::writeTextFragment(const QString text)
+{
+    QTextCursor tc = textCursor();
+    // If we are overwriting, delete the previous text before inserting
+    if (overwriteMode()) {
+        int len = text.length();
+        int pos = tc.positionInBlock();
+        int lineLen = tc.block().length() - 1; // minus one for "newline"
+        if (pos < lineLen) {
+            if ((pos + len) > lineLen) {
+                tc.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+                tc.removeSelectedText();
+            }
+            else if (len > 0) {
+                tc.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor, len);
+                tc.removeSelectedText();
+            }
+        }
+    }
+    tc.setCharFormat(textFormat);
+    tc.insertText(text);
+}
+
+
 void Console::printString(const QString text) {
-  QTextCursor tc = textCursor();
+    // Because STANDOUT requires characters added to strings, we have to
+    // handle them here.
   QStringList stringList = text.split(escapeChar);
   for (auto i = stringList.begin(); i != stringList.end(); ++i) {
 
@@ -51,8 +79,7 @@ void Console::printString(const QString text) {
           textFormat.setBackground(textFormat.foreground());
           textFormat.setForeground(bg);
       }
-      tc.setCharFormat(textFormat);
-      tc.insertText(*i);
+      writeTextFragment(*i);
   }
   ensureCursorVisible();
 }
@@ -71,10 +98,24 @@ void Console::setTextFontSize(double aSize)
     textFormat.setFont(f);
 }
 
-void Console::requestRawline()
+void Console::setTextFontColor(QColor foreground, QColor background)
+{
+    textFormat.setForeground(QBrush(foreground));
+    if (background.isValid()) {
+        QBrush brush = QBrush(background);
+        textFormat.setBackground(brush);
+        QPalette p = palette();
+        p.setBrush(QPalette::Base, brush);
+        setPalette(p);
+    }
+}
+
+
+void Console::requestRawlineWithPrompt(const QString prompt)
 {
     consoleMode = consoleModeWaitingForRawline;
     moveCursor(QTextCursor::End);
+    printString(prompt);
     beginningOfRawline = textCursor().position();
     beginningOfRawlineInBlock = textCursor().positionInBlock();
     lineInputHistory.push_back("");
@@ -90,6 +131,40 @@ void Console::requestChar()
 
     insertNextCharFromQueue();
 }
+
+
+void Console::getCursorPos(int &row, int &col)
+{
+  QTextCursor tc = textCursor();
+  row = tc.blockNumber();
+  col = tc.positionInBlock();
+}
+
+void Console::setTextCursorPosition(int row, int col)
+{
+    int countOfRows = document()->blockCount();
+    while (countOfRows <= row) {
+      moveCursor(QTextCursor::End);
+      textCursor().insertBlock();
+      ++countOfRows;
+    }
+
+    QTextBlock line = document()->findBlockByNumber(row);
+    int countOfCols = line.length();
+
+    QTextCursor tc = textCursor();
+    if (countOfCols <= col) {
+      tc.setPosition(line.position());
+      tc.movePosition(QTextCursor::EndOfBlock);
+      QString fill = QString(col - countOfCols + 1, QChar(' '));
+      tc.insertText(fill);
+      tc.movePosition(QTextCursor::EndOfBlock);
+    } else {
+      tc.setPosition(line.position() + col);
+    }
+    setTextCursor(tc);
+}
+
 
 
 void Console::keyPressEvent(QKeyEvent *event)
@@ -116,7 +191,7 @@ void Console::processCharModeKeyPressEvent(QKeyEvent *event)
       if (t.length() > 1) {
           keyQueue.push_back(t.right(t.length()-1));
       }
-      sendCharSignal(t[0]);
+      emit sendCharSignal(t[0]);
   }
 }
 
@@ -218,7 +293,7 @@ void Console::processLineModeKeyPressEvent(QKeyEvent *event)
       moveCursor(QTextCursor::End);
       textCursor().insertBlock();
       lineInputHistory.last() = line;
-      sendRawlineSignal(line);
+      emit sendRawlineSignal(line);
       return;
     }
 
@@ -262,7 +337,7 @@ void Console::insertNextLineFromQueue() {
       QString line = block.right(block.size() - beginningOfRawlineInBlock);
       textCursor().insertBlock();
       keyQueue = keyQueue.right(keyQueue.size() - 1);
-      sendRawlineSignal(line);
+      emit sendRawlineSignal(line);
     }
   }
 }
@@ -274,7 +349,7 @@ void Console::insertNextCharFromQueue()
         consoleMode = consoleModeNoWait;
         QChar c = keyQueue[0];
         keyQueue = keyQueue.right(keyQueue.size() - 1);
-        sendCharSignal(c);
+        emit sendCharSignal(c);
     }
 }
 

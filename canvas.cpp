@@ -33,6 +33,7 @@
 #include <QOpenGLBuffer>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
+#include <QMouseEvent>
 
 
 inline GLfloat lerp(float a, float b, float t) { return a * t + b * (1 - t); }
@@ -288,6 +289,21 @@ QPointF Canvas::worldToScreen(const QVector4D &world) {
   return QPointF((pv.x() + 1) * widgetWidth / 2,
                  widgetHeight - (pv.y() + 1) * widgetHeight / 2);
 }
+
+// Create a line from the near to far frustum at the mouse click.
+// Calculate where that line intersects with the Z=0 plane.
+QVector2D Canvas::screenToWorld(const QPointF &p) {
+  QPointF q(2 * p.x() / widgetWidth - 1,
+            -2 * (p.y() - widgetHeight) / widgetHeight - 1);
+  QVector4D s0(q.x(), q.y(), 0, 1);
+  QVector4D s1(q.x(), q.y(), 1, 1);
+  QVector3D p0 = (s0 * invertedMatrix).toVector3DAffine();
+  QVector3D p1 = (s1 * invertedMatrix).toVector3DAffine();
+  float u = -p0.z() / (p1.z() - p0.z());
+  return QVector2D(p0.x() + u * (p1.x() - p0.x()),
+                   p0.y() + u * (p1.y() - p0.y()));
+}
+
 
 void Canvas::addLine(const QVector3D &vertexA, const QVector3D &vertexB, const QColor &color)
 {
@@ -629,3 +645,68 @@ void Canvas::setPensize(GLfloat aSize) {
   }
 }
 
+
+QImage Canvas::getImage()
+{
+    QImage framebuffer = grabFramebuffer();
+
+    if (framebuffer.width() * framebuffer.height() == 0)
+        return framebuffer;
+
+    // If our canvas has bounds, then clip
+    if (canvasIsBounded) {
+        double fbwidth = framebuffer.width();
+        double fbheight = framebuffer.height();
+        double fbaspect = fbheight / fbwidth;
+        double canvasaspect = boundsY / boundsX;
+        double x = 0;
+        double y = 0;
+        double width = fbwidth;
+        double height = fbheight;
+
+        if (fbaspect > canvasaspect) {
+            // clip top and bottom
+            height = fbwidth * canvasaspect;
+            if (height > fbheight) height = fbheight;
+            y = (fbheight - height) / 2;
+        } else {
+            // clip left and right
+            width = fbheight / canvasaspect;
+            if (width > fbwidth) width = fbwidth;
+            x = (fbwidth - width) / 2;
+        }
+        framebuffer = framebuffer.copy((int)x, (int)y, (int)width, (int)height);
+    }
+    return framebuffer;
+
+}
+
+void Canvas::mousePressEvent(QMouseEvent *event) {
+    int buttonID = 0;
+  Qt::MouseButton button = event->button();
+  if (button & Qt::MiddleButton)
+    buttonID = 3;
+  if (button & Qt::RightButton)
+    buttonID = 2;
+  if (button & Qt::LeftButton)
+    buttonID = 1;
+  QVector2D clickPos = screenToWorld(event->position());
+  if ( ! canvasIsBounded || (fabsf(clickPos.x()) <= boundsX) && (fabsf(clickPos.y()) <= boundsY)) {
+    mouseButtonPressed = true;
+    emit sendMouseclickedSignal(clickPos, buttonID);
+  }
+}
+
+void Canvas::mouseMoveEvent(QMouseEvent *event) {
+    QVector2D mousePos = screenToWorld(event->position());
+    if (mouseButtonPressed ||
+            ! canvasIsBounded ||
+            (fabsf(mousePos.x()) <= boundsX) && (fabsf(mousePos.y()) <= boundsY))
+        emit sendMousemovedSignal(mousePos);
+
+}
+
+void Canvas::mouseReleaseEvent(QMouseEvent *) {
+  mouseButtonPressed = false;
+  emit sendMouseReleasedSignal();
+}

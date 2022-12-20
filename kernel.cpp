@@ -26,7 +26,6 @@
 
 #include "kernel.h"
 #include "parser.h"
-//#include <math.h>
 #include <QColor>
 #include <QFont>
 #include <QImage>
@@ -37,7 +36,6 @@
 #include "turtle.h"
 
 #include "logocontroller.h"
-#include "qlogocontroller.h"
 
 // The maximum depth of procedure iterations before error is thrown.
 const int maxIterationDepth = 1000;
@@ -90,6 +88,8 @@ DatumP Kernel::excGotoToken(DatumP) { return nothing; }
 bool Kernel::isInputRedirected() { return readStream != NULL; }
 
 bool Kernel::numbersFromList(QVector<double> &retval, DatumP l) {
+    if ( ! l.isList())
+        return false;
   ListIterator iter = l.listValue()->newIterator();
 
   retval.clear();

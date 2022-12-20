@@ -26,9 +26,9 @@
 
 #include "error.h"
 #include "kernel.h"
+#include "turtle.h"
 
 #include "logocontroller.h"
-#include "qlogocontroller.h"
 
 #include <math.h>
 
@@ -268,12 +268,9 @@ DatumP Kernel::excTowards(DatumP node) {
 
 DatumP Kernel::excScrunch(DatumP node) {
   ProcedureHelper h(this, node);
-  double x = 0;
-  double y = 0;
-  mainTurtle()->getScrunch(x, y);
   List *retval = new List;
-  retval->append(DatumP(new Word(x)));
-  retval->append(DatumP(new Word(y)));
+  retval->append(DatumP(new Word(1)));
+  retval->append(DatumP(new Word(1)));
   return h.ret(retval);
 }
 
@@ -282,7 +279,7 @@ DatumP Kernel::excScrunch(DatumP node) {
 DatumP Kernel::excShowturtle(DatumP node) {
   ProcedureHelper h(this, node);
   mainTurtle()->setIsTurtleVisible(true);
-  mainController()->updateCanvas();
+  mainController()->setTurtleIsVisible(true);
 
   return h.ret();
 }
@@ -290,7 +287,7 @@ DatumP Kernel::excShowturtle(DatumP node) {
 DatumP Kernel::excHideturtle(DatumP node) {
   ProcedureHelper h(this, node);
   mainTurtle()->setIsTurtleVisible(false);
-  mainController()->updateCanvas();
+  mainController()->setTurtleIsVisible(false);
 
   return h.ret();
 }
@@ -314,7 +311,11 @@ DatumP Kernel::excWrap(DatumP node) {
   TurtleModeEnum newMode = turtleWrap;
   if (mainTurtle()->getMode() != newMode) {
     mainTurtle()->setMode(newMode);
-    mainController()->setIsCanvasBounded(true);
+    if (mainController()->isCanvasBounded() == false) {
+        mainController()->setIsCanvasBounded(true);
+        mainTurtle()->home(false);
+        mainController()->clearScreen();
+    }
   }
   return h.ret();
 }
@@ -334,7 +335,11 @@ DatumP Kernel::excFence(DatumP node) {
   TurtleModeEnum newMode = turtleFence;
   if (mainTurtle()->getMode() != newMode) {
     mainTurtle()->setMode(newMode);
-    mainController()->setIsCanvasBounded(true);
+    if (mainController()->isCanvasBounded() == false) {
+        mainController()->setIsCanvasBounded(true);
+        mainTurtle()->home(false);
+        mainController()->clearScreen();
+    }
   }
   return h.ret();
 }
@@ -421,11 +426,6 @@ DatumP Kernel::excSplitscreen(DatumP node) {
 
 DatumP Kernel::excSetscrunch(DatumP node) {
   ProcedureHelper h(this, node);
-  auto v = [](double candidate) { return candidate != 0; };
-
-  double x = h.validatedNumberAtIndex(0, v);
-  double y = h.validatedNumberAtIndex(1, v);
-  mainTurtle()->setScrunch(x, y);
   return nothing;
 }
 
@@ -647,24 +647,24 @@ DatumP Kernel::excSavepict(DatumP node) {
   return nothing;
 }
 
-// MORE QUERIES
+// MOUSE QUERIES
 
 DatumP Kernel::excMousepos(DatumP node) {
   ProcedureHelper h(this, node);
   List *retval = new List;
-  DatumP retvalP = h.ret(retval);
-  retval->append(DatumP(new Word(mainController()->mousePos.x())));
-  retval->append(DatumP(new Word(mainController()->mousePos.y())));
-  return retvalP;
+  QVector2D position = mainController()->mousePosition();
+  retval->append(DatumP(new Word(position.x())));
+  retval->append(DatumP(new Word(position.y())));
+  return h.ret(retval);
 }
 
 DatumP Kernel::excClickpos(DatumP node) {
   ProcedureHelper h(this, node);
   List *retval = new List;
-  DatumP retvalP = h.ret(retval);
-  retval->append(DatumP(new Word(mainController()->clickPos.x())));
-  retval->append(DatumP(new Word(mainController()->clickPos.y())));
-  return retvalP;
+  QVector2D position = mainController()->lastMouseclickPosition();
+  retval->append(DatumP(new Word(position.x())));
+  retval->append(DatumP(new Word(position.y())));
+  return h.ret(retval);
 }
 
 DatumP Kernel::excButtonp(DatumP node) {
@@ -674,5 +674,5 @@ DatumP Kernel::excButtonp(DatumP node) {
 
 DatumP Kernel::excButton(DatumP node) {
   ProcedureHelper h(this, node);
-  return h.ret(new Word(mainController()->getButton()));
+  return h.ret(new Word(mainController()->getAndResetButtonID()));
 }

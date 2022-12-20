@@ -31,9 +31,11 @@
 #include <QProcess>
 #include <QDataStream>
 #include <functional>
+#include "constants.h"
 
 class Canvas;
 class Console;
+class EditorWindow;
 
 namespace Ui {
 class MainWindow;
@@ -56,6 +58,8 @@ public:
   ~MainWindow();
   void show();
 
+  void mouseButtonWasPressed(QVector2D position, int buttonID);
+
 private:
   Ui::MainWindow *ui;
 
@@ -63,14 +67,21 @@ private:
 
   windowMode_t windowMode;
   bool hasShownCanvas = false;
+  EditorWindow *editWindow = NULL;
 
   int startLogo();
-  void beginReadRawline();
+  void beginReadRawlineWithPrompt(const QString prompt);
   void beginReadChar();
+  void sendConsoleCursorPosition();
+
   void sendMessage(std::function<void (QDataStream*)> func);
 
   void initialize();
   void introduceCanvas();
+  void setSplitterforMode(ScreenModeEnum mode);
+  void openEditorWindow(const QString startingText);
+
+  void sendCanvasImage();
 
 public slots:
   void readStandardOutput();
@@ -82,6 +93,12 @@ public slots:
   void sendRawlineSlot(const QString &line);
   void sendCharSlot(QChar c);
   void splitterHasMovedSlot(int, int);
+  void editingHasEndedSlot(QString text);
+
+  void mouseclickedSlot(const QVector2D position, int buttonID);
+  void mousemovedSlot(const QVector2D position);
+  void mousereleasedSlot();
+
 };
 
 #endif // MAINWINDOW_H

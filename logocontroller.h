@@ -1,25 +1,139 @@
+
+//===-- qlogo/logocontroller.h - LogoController class definition -------*- C++
+//-*-===//
+//
+// This file is part of QLogo.
+//
+// QLogo is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// QLogo is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with QLogo.  If not, see <http://www.gnu.org/licenses/>.
+//
+//===----------------------------------------------------------------------===//
+///
+/// \file
+/// This file contains the declaration of the LogoController class, which is the
+/// superclass for QLogoController.
+///
+//===----------------------------------------------------------------------===//
+
 #ifndef LOGOCONTROLLER_H
 #define LOGOCONTROLLER_H
 
-#include "controller.h"
+#include "constants.h"
+#include "datum.h"
+#include <QColor>
+#include <QImage>
+#include <QObject>
+#include <QThread>
+#include <QVector2D>
+#include <QFont>
+#include "error.h"
 
-class LogoController : public Controller
-{
+class Kernel;
+class QTextStream;
+
+
+class LogoController : public QObject {
+  Q_OBJECT
+
+    virtual void processInputMessageQueue() {}
+
+public:
+  LogoController(QObject *parent = 0);
+  ~LogoController();
+
+  /// Returns the most recent interrupt signal that was received. Resets the signal.
+  SignalsEnum_t latestSignal();
+
+  virtual void initialize() {}
+  virtual DatumP readRawlineWithPrompt(const QString);
+  virtual DatumP readchar();
+  virtual bool atEnd();
+  virtual void printToConsole(const QString &);
+  int run(void);
+  virtual void systemStop(void);
+  virtual void mwait(unsigned long);
+  virtual const QString editText(const QString ) { Error::noGraphics(); return QString(""); }
+
+  virtual void drawLine(const QVector3D &, const QVector3D &, const QColor &, const QColor &) { Error::noGraphics(); }
+  virtual void drawPolygon(const QList<QVector3D> &, const QList<QColor> &) { Error::noGraphics(); }
+  virtual void clearScreen(void) { Error::noGraphics(); }
+  virtual void clearScreenText(void) { Error::noGraphics(); }
+  virtual void drawLabel(const QString &, const QVector3D &, const QColor &) { Error::noGraphics(); }
+  virtual QString addStandoutToString(const QString src) { return src; };
+  virtual bool keyQueueHasChars();
+  bool setDribble(const QString &filePath);
+  bool isDribbling();
+  virtual void setBounds(double x, double y) { Error::noGraphics(); }
+  virtual double boundX() { Error::noGraphics(); return 0; }
+  virtual double boundY() { Error::noGraphics(); return 0; }
+  virtual void setCanvasBackgroundColor(QColor) { Error::noGraphics(); }
+  virtual QColor getCanvasBackgroundColor(void) { Error::noGraphics(); return QColor(); }
+  virtual QImage getCanvasImage() { Error::noGraphics(); return QImage(); }
+
+  virtual bool getIsMouseButtonDown() { Error::noGraphics(); return false; }
+  virtual int getAndResetButtonID() { Error::noGraphics();  return 0; }
+  virtual QVector2D lastMouseclickPosition() { Error::noGraphics(); return clickPos; }
+  virtual QVector2D mousePosition() { Error::noGraphics(); return mousePos; }
+
+  virtual void setTextCursorPos(int, int) { Error::noGraphics(); }
+  virtual void getTextCursorPos(int &, int &) { Error::noGraphics(); }
+  virtual void setTextColor(const QColor, const QColor) { Error::noGraphics(); }
+  virtual void setTextFontSize(double) { Error::noGraphics(); }
+  virtual double getTextFontSize() { Error::noGraphics(); return 12; }
+  virtual const QString getTextFontName() { Error::noGraphics();  return "Courier New"; }
+  virtual void setTextFontName(const QString) { Error::noGraphics(); }
+  virtual const QStringList getAllFontNames() { Error::noGraphics(); return QStringList(); }
+  virtual void setCursorOverwriteMode(bool) { Error::noGraphics(); }
+  virtual bool cursorOverwriteMode() { Error::noGraphics(); return false; }
+
+  virtual void setLabelFontSize(double) { Error::noGraphics(); }
+  virtual double getLabelFontSize() { Error::noGraphics(); return 12; }
+  virtual const QString getLabelFontName() { Error::noGraphics(); return QString(); }
+  virtual void setLabelFontName(const QString &) { Error::noGraphics(); }
+
+  virtual void setTurtlePos(const QMatrix4x4 &) { Error::noGraphics(); }
+  virtual void setTurtleIsVisible(bool) { Error::noGraphics(); }
+  virtual void setPenmode(PenModeEnum) { Error::noGraphics(); }
+  virtual void setScreenMode(ScreenModeEnum) { Error::noGraphics(); }
+  virtual ScreenModeEnum getScreenMode() { Error::noGraphics(); return textScreenMode; }
+
+  virtual void setPensize(double) { Error::noGraphics(); }
+  virtual bool isPenSizeValid(double) { Error::noGraphics(); return false; }
+  virtual void setIsCanvasBounded(bool) { Error::noGraphics(); }
+  virtual bool isCanvasBounded() { Error::noGraphics(); return false; }
+  void setSplitterSizeRatios(float, float) { Error::noGraphics(); }
+
+  Kernel *kernel;
+
 protected:
+  qreal boundsX = 150;
+  qreal boundsY = 150;
+
+  QVector2D mousePos = QVector2D(0,0);
+  QVector2D clickPos = QVector2D(0,0);
+  int lastButtonpressID = 0;
+  bool isMouseButtonDown = false;
+
+  QTextStream *readStream;
+  QTextStream *writeStream;
+
+  QTextStream *dribbleStream;
+
     QTextStream *inStream;
     QTextStream *outStream;
 
-
-public:
-    LogoController(QObject *parent = NULL);
-    ~LogoController();
-
-    DatumP readRawlineWithPrompt(const QString &prompt);
-    DatumP readchar();
-    bool atEnd();
-    void printToConsole(const QString &s);
-    bool keyQueueHasChars();
-    void mwait(unsigned long);
 };
+
+LogoController *mainController();
 
 #endif // LOGOCONTROLLER_H

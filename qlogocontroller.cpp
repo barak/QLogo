@@ -1,4 +1,5 @@
 #include "qlogocontroller.h"
+#include <QMatrix4x4>
 #include <QMessageBox>
 #include <QByteArray>
 #include <QDataStream>
@@ -24,7 +25,7 @@ void sendMessage(std::function<void (QDataStream*)> func)
 }
 
 
-QLogoController::QLogoController(QObject *parent) : Controller(parent)
+QLogoController::QLogoController(QObject *parent) : LogoController(parent)
 {
 #ifdef _WIN32
     // That dreaded \r\n <-> \n problem
@@ -64,9 +65,9 @@ void QLogoController::initialize()
 }
 
 /* a message has three parts:
- * 1. A quint detailing how many bytes are in the remainder of the message (datalen).
- * 2. An enum describing the type of data (header).
- * 3. The data (varies).
+ * 1. datalen: A quint detailing how many bytes are in the remainder of the message.
+ * 2. header:  An enum describing the type of data.
+ * 3. The data (varies, may be empty).
  */
 message_t QLogoController::getMessage()
 {
@@ -90,6 +91,7 @@ message_t QLogoController::getMessage()
                      >> maxPensize
                      >> xbound
                      >> ybound
+                     >> currentBackgroundColor
                 ;
         labelFontName = textFontName;
         break;
@@ -110,11 +112,40 @@ message_t QLogoController::getMessage()
     case C_CONSOLE_CHAR_READ:
         bufferStream >> rawChar;
         break;
+    case C_CONSOLE_END_EDIT_TEXT:
+        bufferStream >> editorText;
+        break;
+    case C_CONSOLE_TEXT_CURSOR_POS:
+        bufferStream >> cursorRow
+                     >> cursorCol;
+        break;
+    case C_CANVAS_GET_IMAGE:
+        bufferStream >> canvasImage;
+        break;
+    case C_CANVAS_MOUSE_BUTTON_DOWN:
+        bufferStream >> clickPos
+                     >> lastButtonpressID;
+        isMouseButtonDown = true;
+        break;
+    case C_CANVAS_MOUSE_BUTTON_UP:
+        isMouseButtonDown = false;
+        break;
+    case C_CANVAS_MOUSE_MOVED:
+        bufferStream >> mousePos;
+        break;
     default:
         qDebug() <<"I don't know how I got " << header;
         break;
     }
     return header;
+}
+
+
+void QLogoController::processInputMessageQueue()
+{
+    while (messageQueue.isMessageAvailable()) {
+        getMessage();
+    }
 }
 
 
@@ -139,6 +170,77 @@ void QLogoController::printToConsole(const QString &s)
     } else {
       *writeStream << s;
     }
+}
+
+
+QString QLogoController::addStandoutToString(const QString src) {
+  QString retval = escapeString + src + escapeString;
+  return retval;
+}
+
+
+void QLogoController::clearScreenText()
+{
+    sendMessage([&](QDataStream *out) {
+        *out << (message_t)C_CANVAS_CLEAR_SCREEN_TEXT;
+    });
+}
+
+void QLogoController::getTextCursorPos(int &row, int &col)
+{
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CONSOLE_TEXT_CURSOR_POS;
+    });
+
+    waitForMessage(C_CONSOLE_TEXT_CURSOR_POS);
+    row = cursorRow;
+    col = cursorCol;
+}
+
+
+void QLogoController::setTextCursorPos(int row, int col)
+{
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CONSOLE_SET_TEXT_CURSOR_POS
+           << row
+           << col;
+    });
+}
+
+
+void QLogoController::setTextColor(const QColor foregroundColor, const QColor backgroundColor)
+{
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CONSOLE_SET_TEXT_COLOR
+           << foregroundColor
+           << backgroundColor;
+    });
+}
+
+void QLogoController::setCursorOverwriteMode(bool isOverwriteMode)
+{
+    cursoreModeIsOverwrite = isOverwriteMode;
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CONSOLE_SET_CURSOR_MODE
+           << isOverwriteMode;
+    });
+}
+
+bool QLogoController::cursorOverwriteMode()
+{
+    return cursoreModeIsOverwrite;
+}
+
+
+const QString QLogoController::editText(const QString startText)
+{
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CONSOLE_BEGIN_EDIT_TEXT << startText;
+    });
+
+    waitForMessage(C_CONSOLE_END_EDIT_TEXT);
+
+    return editorText;
 }
 
 void QLogoController::setTextFontName(const QString aFontName)
@@ -173,17 +275,15 @@ const QString QLogoController::getTextFontName()
 }
 
 // TODO: I believe this is only called if the input readStream is NULL
-DatumP QLogoController::readRawlineWithPrompt(const QString &prompt)
+DatumP QLogoController::readRawlineWithPrompt(const QString prompt)
 {
-  sendMessage([&](QDataStream *out) {
-    *out << (message_t)C_CONSOLE_PRINT_STRING << prompt;
-  });
-  sendMessage([&](QDataStream *out) {
-    *out << (message_t)C_CONSOLE_REQUEST_LINE;
-  });
-  if (dribbleStream)
-    *dribbleStream << prompt;
+    if (dribbleStream)
+      *dribbleStream << prompt;
 
+  sendMessage([&](QDataStream *out) {
+    *out << (message_t)C_CONSOLE_REQUEST_LINE
+         << prompt;
+  });
   waitForMessage(C_CONSOLE_RAWLINE_READ);
 
   return DatumP(new Word(rawLine));
@@ -206,6 +306,51 @@ void QLogoController::setTurtlePos(const QMatrix4x4 &newTurtlePos)
   sendMessage([&](QDataStream *out) {
     *out << (message_t)C_CANVAS_UPDATE_TURTLE_POS << newTurtlePos;
   });
+}
+
+void QLogoController::setPenmode(PenModeEnum aMode)
+{
+    if (aMode == currentPenmode)
+        return;
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CANVAS_SET_PENMODE << aMode;
+    });
+}
+
+
+void QLogoController::setScreenMode(ScreenModeEnum newMode)
+{
+    screenMode = newMode;
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)W_SET_SCREENMODE << newMode;
+    });
+}
+
+ScreenModeEnum QLogoController::getScreenMode()
+{
+    return screenMode;
+}
+
+void QLogoController::setIsCanvasBounded(bool aIsBounded)
+{
+    if (canvasIsBounded == aIsBounded)
+        return;
+    canvasIsBounded = aIsBounded;
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CANVAS_SET_IS_BOUNDED << aIsBounded;
+    });
+}
+
+bool QLogoController::isCanvasBounded()
+{
+    return canvasIsBounded;
+}
+
+void QLogoController::setTurtleIsVisible(bool isVisible)
+{
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CANVAS_SET_TURTLE_IS_VISIBLE << isVisible;
+    });
 }
 
 void QLogoController::drawLine(const QVector3D &start, const QVector3D &end, const QColor &startColor, const QColor &endColor)
@@ -272,10 +417,16 @@ double QLogoController::getLabelFontSize()
 
 void QLogoController::setCanvasBackgroundColor(QColor aColor)
 {
+    currentBackgroundColor = aColor;
     sendMessage([&](QDataStream *out) {
       *out << (message_t)C_CANVAS_SET_BACKGROUND_COLOR
            << aColor;
     });
+}
+
+QColor QLogoController::getCanvasBackgroundColor(void)
+{
+    return currentBackgroundColor;
 }
 
 void QLogoController::clearScreen()
@@ -284,6 +435,46 @@ void QLogoController::clearScreen()
       *out << (message_t)C_CANVAS_CLEAR_SCREEN;
     });
 }
+
+QImage QLogoController::getCanvasImage()
+{
+    sendMessage([&](QDataStream *out) {
+      *out << (message_t)C_CANVAS_GET_IMAGE;
+    });
+
+    waitForMessage(C_CANVAS_GET_IMAGE);
+
+    return canvasImage;
+}
+
+bool QLogoController::getIsMouseButtonDown()
+{
+    processInputMessageQueue();
+    return isMouseButtonDown;
+}
+
+QVector2D QLogoController::lastMouseclickPosition()
+{
+    processInputMessageQueue();
+    return clickPos;
+}
+
+
+int QLogoController::getAndResetButtonID()
+{
+    processInputMessageQueue();
+    int retval = lastButtonpressID;
+    lastButtonpressID = 0;
+    return retval;
+}
+
+
+QVector2D QLogoController::mousePosition()
+{
+    processInputMessageQueue();
+    return mousePos;
+}
+
 
 void QLogoController::setBounds(double x, double y)
 {

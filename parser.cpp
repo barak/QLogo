@@ -25,15 +25,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "parser.h"
+#include "QtCore/qstringliteral.h"
+#include "logocontroller.h"
 #include "error.h"
 #include "kernel.h"
 #include <qdatetime.h>
 #include <qdebug.h>
 
-#include "logocontroller.h"
-#include "qlogocontroller.h"
 
-static const QString specialChars("+-()*%/<>=");
+const QString specialChars(QStringLiteral ("+-()*%/<>="));
 
 char lastNonSpaceChar(const QString &line) {
   char retval = ' ';
@@ -408,6 +408,8 @@ void Parser::inputProcedure(DatumP nodeP, QTextStream *readStream) {
   // Now read in the body
   forever {
     DatumP line = readlistWithPrompt("> ", true, readStream);
+    if ( ! line.isList()) // this must be the end of the input
+        break;
     DatumP lineSource = lastReadListSource();
     ListIterator lineSourceIter = lineSource.listValue()->newIterator();
     while (lineSourceIter.elementExists()) {

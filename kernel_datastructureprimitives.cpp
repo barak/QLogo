@@ -29,7 +29,6 @@
 #include <QTextStream>
 
 #include "logocontroller.h"
-#include "qlogocontroller.h"
 
 // CONSTRUCTORS
 

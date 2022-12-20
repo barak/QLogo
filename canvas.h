@@ -34,6 +34,7 @@
 class QOpenGLShaderProgram;
 class QOpenGLBuffer;
 class QOpenGLVertexArrayObject;
+class MainWindow;
 
 /// Contains the information that describes a label's appearance on the Canvas.
 class Label {
@@ -85,7 +86,8 @@ class Canvas : public QOpenGLWidget, protected QOpenGLFunctions {
   QMatrix4x4 turtleMatrix;
   bool turtleIsVisible;
 
-  bool canvasIsBounded;
+  bool canvasIsBounded = true;
+  bool mouseButtonPressed = false;
 
   // Visible vertices on the X axis range from -boundsX to +boundsX
   double boundsX;
@@ -115,9 +117,9 @@ class Canvas : public QOpenGLWidget, protected QOpenGLFunctions {
   int widgetWidth;
   int widgetHeight;
 
-  void initializeGL() override;
-  void resizeGL(int width, int height) override;
-  void paintGL() override;
+  void initializeGL() Q_DECL_OVERRIDE;
+  void resizeGL(int width, int height) Q_DECL_OVERRIDE;
+  void paintGL() Q_DECL_OVERRIDE;
 
   // The collection of text labels
   QList<Label> labels;
@@ -163,6 +165,10 @@ class Canvas : public QOpenGLWidget, protected QOpenGLFunctions {
 
   void updateMatrix(void);
 
+  void mousePressEvent(QMouseEvent *event) Q_DECL_OVERRIDE;
+  void mouseMoveEvent(QMouseEvent *event) Q_DECL_OVERRIDE;
+  void mouseReleaseEvent(QMouseEvent *) Q_DECL_OVERRIDE;
+
 public:
   /// Construct a Canvas
   Canvas(QWidget *parent = 0);
@@ -194,6 +200,8 @@ public:
 
   QPointF worldToScreen(const QVector4D &world);
 
+  QVector2D screenToWorld(const QPointF &p);
+
   /// Clears the screen and removes all drawing elements from their respective
   /// lists.
   void clearScreen();
@@ -212,6 +220,20 @@ public:
 
   /// Set the maximum X and Y bounds
   void setBounds(double x, double y);
+
+  /// Set whether the view should use the whole widget or a box within
+  void setIsBounded(bool aIsBounded) { canvasIsBounded = aIsBounded; update(); }
+
+  /// Returns true if the bounds are drawn
+  bool isBounded() { return canvasIsBounded; }
+
+  /// Return a screenshot of the canvas
+  QImage getImage();
+
+signals:
+  void sendMouseclickedSignal(const QVector2D position, int buttonID);
+  void sendMousemovedSignal(const QVector2D position);
+  void sendMouseReleasedSignal();
 
 };
 
