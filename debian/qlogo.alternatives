@@ -2,3 +2,8 @@ Name: logo
 Link: /usr/bin/logo
 Alternative: /usr/bin/QLogo
 Priority: 20
+
+Name: logo
+Link: /usr/bin/logo
+Alternative: /usr/bin/QLogo-cli
+Priority: 15
