@@ -7,8 +7,11 @@ qlogo (0.94alpha3-1) UNRELEASED; urgency=medium
   * Need build dependency on libqt6opengl6-dev
   * dh_installalternatives
   * New upstream alpha release
+  * Patch for missing #include <signal.h>
+  * Fix for upstream installing binaries in /usr instead of /usr/bin
+  * Update QLogo-tryway to qt6
 
- -- Barak A. Pearlmutter <bap@debian.org>  Tue, 20 Dec 2022 16:42:21 +0000
+ -- Barak A. Pearlmutter <bap@debian.org>  Sat, 31 Dec 2022 02:22:48 +0000
 
 qlogo (0.92-2) unstable; urgency=low
 

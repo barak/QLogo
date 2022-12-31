@@ -1,0 +1,20 @@
+From: "Barak A. Pearlmutter" <barak+git@pearlmutter.net>
+Date: Sat, 31 Dec 2022 02:19:15 +0000
+Subject: signal.h
+
+---
+ logocontroller.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/logocontroller.h b/logocontroller.h
+index a09f3ec..2cfd698 100644
+--- a/logocontroller.h
++++ b/logocontroller.h
+@@ -36,6 +36,7 @@
+ #include <QThread>
+ #include <QVector2D>
+ #include <QFont>
++#include <signal.h>
+ #include "error.h"
+ 
+ class Kernel;
