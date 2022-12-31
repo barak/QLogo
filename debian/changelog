@@ -11,8 +11,9 @@ qlogo (0.94alpha3-1) UNRELEASED; urgency=medium
   * Fix for upstream installing binaries in /usr instead of /usr/bin
   * Update QLogo-tryway to qt6
   * Install upstream desktop file
+  * Install upstream icon
 
- -- Barak A. Pearlmutter <bap@debian.org>  Sat, 31 Dec 2022 19:04:41 +0000
+ -- Barak A. Pearlmutter <bap@debian.org>  Sat, 31 Dec 2022 19:09:38 +0000
 
 qlogo (0.92-2) unstable; urgency=low
 
