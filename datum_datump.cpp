@@ -107,9 +107,13 @@ bool DatumP::isList() { return d->isa() == Datum::listType; }
 
 bool DatumP::isArray() { return d->isa() == Datum::arrayType; }
 
+bool DatumP::isObject() { return d->isa() == Datum::objectType; }
+
 bool DatumP::isWord() { return d->isa() == Datum::wordType; }
 
 bool DatumP::isError() { return d->isa() == Datum::errorType; }
+
+bool DatumP::isNothing() { return d == &notADatum; }
 
 Word *DatumP::wordValue() {
   Q_ASSERT(d->isa() == Datum::wordType);
@@ -136,6 +140,14 @@ Array *DatumP::arrayValue() {
   Q_ASSERT(d->isa() == Datum::arrayType);
   return (Array *)d;
 }
+
+Object *DatumP::objectValue() {
+  if (d->isa() != Datum::objectType)
+    qDebug() <<"Not an object";
+  Q_ASSERT(d->isa() == Datum::objectType);
+  return (Object *)d;
+}
+
 
 Procedure *DatumP::procedureValue() {
   if (d->isa() != Datum::procedureType) {

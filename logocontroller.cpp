@@ -2,6 +2,7 @@
 #include <QIODevice>
 #include "kernel.h"
 #include <QApplication>
+#include <signal.h>
 
 LogoController *_maincontroller = NULL;
 qreal initialBoundXY = 150;
@@ -54,6 +55,10 @@ static void restoreSignals()
     signal(SIGTSTP, SIG_DFL);
     signal(SIGQUIT, SIG_DFL);
 }
+
+
+#endif
+
 
 
 LogoController *mainController() {
@@ -182,8 +187,4 @@ void LogoController::systemStop()
 {
     QApplication::quit();
 }
-
-
-
-#endif
 

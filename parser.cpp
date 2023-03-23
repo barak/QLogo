@@ -71,16 +71,22 @@ void Parser::defineProcedure(DatumP cmd, DatumP procnameP, DatumP text,
   if ((firstChar == '"') || (firstChar == ':'))
     Error::doesntLike(cmd, procnameP);
 
-  if (stringToCmd.contains(procname))
+  if (kernel->currentObject.objectValue()->isLogoObject()
+      && stringToCmd.contains(procname))
     Error::isPrimative(procnameP);
 
   DatumP procBody = createProcedure(cmd, text, sourceText);
 
-  procedures[procname] = procBody;
+  Object *currentObject = kernel->currentObject.objectValue();
+  if (currentObject == kernel->logoObject) {
+      procedures[procname] = procBody;
+      if (kernel->isInputRedirected() && kernel->varUNBURYONEDIT()) {
+        unbury(procname);
+      }
+    } else {
+      currentObject->setProc(procname, procBody);
+    }
 
-  if (kernel->isInputRedirected() && kernel->varUNBURYONEDIT()) {
-    unbury(procname);
-  }
 }
 
 DatumP Parser::createProcedure(DatumP cmd, DatumP text, DatumP sourceText) {
@@ -394,8 +400,14 @@ void Parser::inputProcedure(DatumP nodeP, QTextStream *readStream) {
       (firstChar == ')'))
     Error::doesntLike(to, procnameP);
 
-  if (stringToCmd.contains(procname))
-    Error::procDefined(procnameP);
+  Object *currentObject = kernel->currentObject.objectValue();
+  if (currentObject == kernel->logoObject) {
+      if (stringToCmd.contains(procname))
+        Error::procDefined(procnameP);
+    } else {
+      if (currentObject->hasProc(procname))
+        Error::procDefined(procnameP);
+    }
 
   DatumP textP(new List);
   DatumP sourceText = lastReadListSource();
@@ -886,28 +898,38 @@ DatumP Parser::runparse(DatumP src) {
   return DatumP(runparseRetval);
 }
 
-QList<DatumP> *Parser::astFromList(List *aList) {
-  if (aList->astParseTimeStamp <= lastProcedureCreatedTimestamp) {
-    aList->astParseTimeStamp = QDateTime::currentMSecsSinceEpoch();
+QList<DatumP> *Parser::astFromList(List *aList, QList<DatumP> *aDest) {
 
+  // If aDest is NULL then we want to put the result in aList
+  bool shouldParse = true;
+  if (aDest == NULL) {
+      shouldParse = false;
+      aDest = &(aList->astList);
+      if (aList->astParseTimeStamp <= lastProcedureCreatedTimestamp) {
+          shouldParse = true;
+          aList->astParseTimeStamp = QDateTime::currentMSecsSinceEpoch();
+        }
+    }
+
+  if (shouldParse) {
     DatumP runParsedList = runparse(aList);
 
     listIter = runParsedList.listValue()->newIterator();
-    aList->astList.clear();
+    aDest->clear();
     advanceToken();
 
     try {
         while (currentToken != nothing) {
-            aList->astList.push_back(parseExp());
+            aDest->push_back(parseExp());
         }
     } catch (Error *e) {
         // If there was a syntax error, then delete the parsed list
-        aList->astList.clear();
+        aDest->clear();
         aList->astParseTimeStamp = 0;
         throw e;
     }
   }
-  return &aList->astList;
+  return aDest;
 }
 
 // Below methods parse into ASTs
@@ -1129,7 +1151,7 @@ DatumP Parser::parseStopIfExists(DatumP command)
 }
 
 DatumP Parser::astnodeWithLiterals(DatumP cmd, DatumP params) {
-  int minParams, maxParams, defaultParams;
+  int minParams = 0, maxParams = 0, defaultParams = 0;
   DatumP node = astnodeFromCommand(cmd, minParams, defaultParams, maxParams);
 
   int countOfChildren = params.listValue()->size();
@@ -1149,14 +1171,98 @@ DatumP Parser::astnodeWithLiterals(DatumP cmd, DatumP params) {
   return node;
 }
 
+DatumP Parser::nextUsualProc(const QString procname, DatumP ancestorList)
+{
+
+  while( ! ancestorList.listValue()->isEmpty()) {
+      Object *candidate = ancestorList.listValue()->first().objectValue();
+      if (candidate->hasProc(procname)) {
+          return ancestorList;
+        }
+      ancestorList = ancestorList.listValue()->butfirst();
+    }
+
+  // Not found.
+  return nothing;
+}
+
+
+DatumP Parser::procedureAndASTNodeForCurrentObject(DatumP nodeP, QString cmdString, bool isUsual)
+{
+  Object *sourceObject; // The caller object
+  bool isInProcedureContext;
+  DatumP retval;
+  ASTNode *node = nodeP.astnodeValue();
+
+
+  // Find the source object (default or caller)
+  if (kernel->currentProcedure.isASTNode()) {
+      DatumP objContext = kernel->currentProcedure.astnodeValue()->objectContext;
+      // If we ran out of ancestors, then we are in the Logo object context.
+      if (objContext.isNothing())
+        return nothing;
+      sourceObject = objContext.objectValue();
+      isInProcedureContext = true;
+    } else {
+      sourceObject = kernel->currentObject.objectValue();
+      isInProcedureContext = false;
+    }
+
+  // The callee object
+  Object *destinationObject;
+
+  // if USUAL.foo is called
+  if (isUsual) {
+      Q_ASSERT(isInProcedureContext);
+      // Get the ancestor list from source
+      DatumP currentProcedure = kernel->currentProcedure;
+      DatumP ancestors = kernel->currentProcedure.astnodeValue()->ancestorList;
+      Q_ASSERT( ! ancestors.isNothing());
+      // Find the next occurrence of this procedure in ancestor list
+      DatumP nextAncestorList = nextUsualProc(cmdString, ancestors);
+      if (nextAncestorList.isNothing())
+        return nothing;
+      // Ready callee object
+      destinationObject = nextAncestorList.listValue()->first().objectValue();
+      node->ancestorList = nextAncestorList.listValue()->butfirst();
+    } else {
+      destinationObject = sourceObject->hasProc(cmdString, true);
+      if (destinationObject == NULL)
+        return nothing;
+      node->ancestorList = sourceObject->getAncestors();
+    }
+
+  node->objectContext = DatumP(destinationObject);
+  retval = destinationObject->procForName(cmdString);
+  return retval;
+}
+
+
 DatumP Parser::astnodeFromCommand(DatumP cmdP, int &minParams,
                                   int &defaultParams, int &maxParams) {
   QString cmdString = cmdP.wordValue()->keyValue();
+  bool isUsual = false;
+  if (cmdString.startsWith("USUAL.")) {
+      isUsual = true;
+      cmdString = cmdString.right(cmdString.length() - 6);
+      Q_ASSERT(cmdString.length() > 0);
+      // TODO: cmdString should equal calling cmdString
+      // TODO: cmdString == foo or USUAL.foo
+    }
 
   Cmd_t command;
   DatumP node = DatumP(new ASTNode(cmdP));
-  if (procedures.contains(cmdString)) {
-    DatumP procBody = procedures[cmdString];
+  DatumP procBody;
+  if (kernel->currentObject.objectValue()->isLogoObject()) {
+      Q_ASSERT( ! isUsual);
+    } else {
+      procBody = procedureAndASTNodeForCurrentObject(node, cmdString, isUsual);
+    }
+  if ( procBody.isNothing()) {
+      if (procedures.contains(cmdString))
+        procBody = procedures[cmdString];
+    }
+  if ( ! procBody.isNothing()) {
     if (procBody.procedureValue()->isMacro)
       node.astnodeValue()->kernel = &Kernel::executeMacro;
     else
@@ -1200,9 +1306,9 @@ DatumP Parser::parseCommand(bool isVararg) {
   if (cmdString == ")")
     Error::unexpectedCloseParen();
 
-  int defaultParams;
-  int minParams;
-  int maxParams;
+  int defaultParams = 0;
+  int minParams = 0;
+  int maxParams = 0;
 
   DatumP node = astnodeFromCommand(cmdP, minParams, defaultParams, maxParams);
 
@@ -1451,9 +1557,9 @@ Parser::Parser(Kernel *aKernel) {
 
   // DATA STRUCTURE PRIMITIVES (MIN, default, MAX)
   // (MIN = -1)     = All parameters are read as list, e.g. "TO PROC :p1"
-  // becomes ["TO", "PROC", ":p1"] (default = -1) = All parameters are consumed
-  // until end of line (MAX = -1)     = All parameters are consumed within
-  // parens
+  // becomes ["TO", "PROC", ":p1"]
+  // (default = -1) = All parameters are consumed until end of line
+  // (MAX = -1)     = All parameters are consumed within parens
   stringToCmd["SAVE"] = {&Kernel::excShow, 0, -1, 1};
 
   stringToCmd["WORD"] = {&Kernel::excWord, 0, 2, -1};
@@ -1776,7 +1882,7 @@ Parser::Parser(Kernel *aKernel) {
   stringToCmd["EDITFILE"] = {&Kernel::excEditfile, 1, 1, 1};
   stringToCmd["SAVE"] = {&Kernel::excSave, 0, -1, 1};
   stringToCmd["LOAD"] = {&Kernel::excLoad, 1, 1, 1};
-  stringToCmd["HELP"] = {&Kernel::excHelp, 0, -1, 1};
+  stringToCmd["HELP"] = {&Kernel::excHelp, 0, -1, -1};
 
   // CONTROL STRUCTURES
 
@@ -1814,12 +1920,37 @@ Parser::Parser(Kernel *aKernel) {
   stringToCmd["MACROP"] = {&Kernel::excMacrop, 1, 1, 1};
   stringToCmd["MACRO?"] = {&Kernel::excMacrop, 1, 1, 1};
 
+  // Objects
+
+  stringToCmd["SOMETHING"] = {&Kernel::excSomething, 0, 0, 0};
+  stringToCmd["KINDOF"] = {&Kernel::excKindof, 1, 1, -1};
+  stringToCmd["ASK"] = {&Kernel::excAsk, 2, 2, 2};
+  stringToCmd["SELF"] = {&Kernel::excSelf, 0, 0, 0};
+  stringToCmd["LOGO"] = {&Kernel::excLogo, 0, 0, 0};
+  stringToCmd["PARENTS"] = {&Kernel::excParents, 0, 0, 0};
+  stringToCmd["HAVE"] = {&Kernel::excHave, 1, 1, 1};
+  stringToCmd["HAVEMAKE"] = {&Kernel::excHavemake, 2, 2, 2};
+  stringToCmd["MYNAMES"] = {&Kernel::excMynames, 0, 0, 0};
+  stringToCmd["MYNAMEP"] = {&Kernel::excMynamep, 1, 1, 1};
+  stringToCmd["MYNAME?"] = {&Kernel::excMynamep, 1, 1, 1};
+  stringToCmd["WHOSENAME"] = {&Kernel::excWhosename, 1, 1, 1};
+  stringToCmd["MYPROCS"] = {&Kernel::excMyprocs, 0, 0, 0};
+  stringToCmd["MYPROCP"] = {&Kernel::excMyprocp, 1, 1, 1};
+  stringToCmd["MYPROC?"] = {&Kernel::excMyprocp, 1, 1, 1};
+  stringToCmd["WHOSEPROC"] = {&Kernel::excWhoseproc, 1, 1, 1};
+  stringToCmd["ANCESTORS"] = {&Kernel::excAncestors, 1, 1, 1};
+
+
+  // Depricated
+
   stringToCmd["GC"] = {&Kernel::excNoop, 0, 0, -1};
   stringToCmd[".SETSEGMENTSIZE"] = {&Kernel::excNoop, 1, 1, 1};
   stringToCmd["SETPENPATTERN"] = {&Kernel::excNoop, 1, 1, 1};
   stringToCmd["PENPATTERN"] = {&Kernel::excNoop, 1, 1, 1};
   stringToCmd["REFRESH"] = {&Kernel::excNoop, 0, 0, 0};
   stringToCmd["NOREFRESH"] = {&Kernel::excNoop, 0, 0, 0};
+
+  // Operators that work as prefix
 
   stringToCmd["+"] = {&Kernel::excSum, 0, 2, -1};
   stringToCmd["*"] =

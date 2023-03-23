@@ -21,33 +21,33 @@ set(QLOGO_SOURCES qlogo_main.cpp mainwindow.cpp canvas.cpp console.cpp editorwin
     mainwindow.ui editorwindow.ui)
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
-    qt_add_executable(QLogo
+    qt_add_executable(QLogo-GUI
         MANUAL_FINALIZATION
         ${QLOGO_SOURCES}
     )
 else()
-    add_executable(QLogo
+    add_executable(QLogo-GUI
         ${QLOGO_SOURCES}
     )
 endif()
 
-target_link_libraries(QLogo PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::OpenGLWidgets)
+target_link_libraries(QLogo-GUI PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::OpenGLWidgets)
 
 set(LOGO_SOURCES datum.cpp parser.cpp turtle.cpp vars.cpp kernel.cpp propertylists.cpp kernel_datastructureprimitives.cpp
     kernel_communication.cpp kernel_arithmetic.cpp kernel_graphics.cpp kernel_workspacemanagement.cpp workspace.cpp
-    procedurehelper.cpp help.cpp kernel_controlstructures.cpp error.cpp library.cpp datum_word.cpp datum_astnode.cpp
+    procedurehelper.cpp kernel_controlstructures.cpp error.cpp library.cpp datum_word.cpp datum_astnode.cpp
     datum_list.cpp datum_array.cpp datum_datump.cpp datum_iterator.cpp logo_main.cpp qlogocontroller.cpp logocontroller.cpp
-    inputqueue.cpp
-    datum.h parser.h turtle.h vars.h kernel.h propertylists.h workspace.h procedurehelper.h help.h error.h constants.h
+    inputqueue.cpp datum_object.cpp kernel_object.cpp
+    datum.h parser.h turtle.h vars.h kernel.h propertylists.h workspace.h procedurehelper.h error.h constants.h
     qlogocontroller.h logocontroller.h library.h inputqueue.h)
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
-    qt_add_executable(logo
+    qt_add_executable(qlogo
         MANUAL_FINALIZATION
         ${LOGO_SOURCES}
     )
 else()
-    add_executable(logo
+    add_executable(qlogo
         ${LOGO_SOURCES}
     )
 endif()
@@ -61,13 +61,13 @@ else()
   add_definitions(-DLOGOPLATFORM="UNIX")
 endif()
 
-target_link_libraries(logo PRIVATE Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Widgets)
+target_link_libraries(qlogo PRIVATE Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Widgets)
 
-set_target_properties(logo PROPERTIES
+set_target_properties(qlogo PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
 
-set_target_properties(QLogo PROPERTIES
+set_target_properties(QLogo-GUI PROPERTIES
     MACOSX_BUNDLE_GUI_IDENTIFIER jason.psyches.org
     MACOSX_BUNDLE_BUNDLE_VERSION ${LOGO_VERSION}
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
@@ -75,8 +75,8 @@ set_target_properties(QLogo PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
 if(QT_VERSION_MAJOR EQUAL 6)
-    qt_finalize_executable(QLogo)
-    qt_finalize_executable(logo)
+    qt_finalize_executable(QLogo-GUI)
+    qt_finalize_executable(qlogo)
 endif()
 
-install(TARGETS QLogo logo RUNTIME DESTINATION . BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS QLogo-GUI qlogo RUNTIME DESTINATION . BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR})

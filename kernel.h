@@ -28,7 +28,6 @@
 
 #include "datum.h"
 
-#include "help.h"
 #include "procedurehelper.h"
 #include "propertylists.h"
 #include "vars.h"
@@ -52,7 +51,6 @@ class Kernel {
   Parser *parser;
   Vars variables;
   DatumP filePrefix;
-  Help help;
   long repcount = -1;
   int pauseLevel = 0;
   int procedureIterationDepth = 0;
@@ -77,7 +75,6 @@ class Kernel {
   DatumP readWordWithPrompt(const QString prompt, QTextStream *stream);
 
   DatumP currentError;
-  DatumP currentProcedure;
   DatumP currentLine;
   DatumP callingProcedure;
   DatumP callingLine;
@@ -121,6 +118,9 @@ class Kernel {
   /// Check for interrupts and handle them accordingly.
   SignalsEnum_t interruptCheck();
 
+  DatumP datumForName(const QString &name);
+  void setDatumForName(DatumP &aDatum, const QString &name);
+
 public:
   Kernel();
   ~Kernel();
@@ -133,6 +133,10 @@ public:
   DatumP pause();
 
   Turtle *turtle;
+  Object *logoObject;
+  DatumP currentObject;
+  DatumP currentProcedure;
+
   bool isInputRedirected();
   void initLibrary();
 
@@ -443,6 +447,24 @@ public:
   DatumP excTag(DatumP);
   DatumP excGoto(DatumP node);
   DatumP excGotoToken(DatumP);
+
+  // Objects
+
+  DatumP excSomething(DatumP);
+  DatumP excKindof(DatumP node);
+  DatumP excAsk(DatumP node);
+  DatumP excSelf(DatumP node);
+  DatumP excLogo(DatumP node);
+  DatumP excParents(DatumP node);
+  DatumP excHave(DatumP node);
+  DatumP excHavemake(DatumP node);
+  DatumP excMynames(DatumP node);
+  DatumP excMynamep(DatumP node);
+  DatumP excWhosename(DatumP node);
+  DatumP excMyprocs(DatumP node);
+  DatumP excMyprocp(DatumP node);
+  DatumP excWhoseproc(DatumP node);
+  DatumP excAncestors(DatumP node);
 
   // TEMPLATE-BASED ITERATION
 

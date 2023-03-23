@@ -75,6 +75,9 @@ class Parser : public Workspace {
   DatumP parseTermexp();
   DatumP parseCommand(bool isVararg);
   DatumP parseStopIfExists(DatumP command);
+
+  DatumP nextUsualProc(const QString procname, DatumP ancestorList);
+  DatumP procedureAndASTNodeForCurrentObject(DatumP nodeP, QString cmdString, bool isUsual);
   DatumP astnodeFromCommand(DatumP command, int &minParams, int &defaultParams,
                             int &maxParams);
 
@@ -88,7 +91,7 @@ public:
   DatumP readlistWithPrompt(const QString &prompt, bool shouldRemoveComments,
                             QTextStream *readStream);
   DatumP runparse(DatumP src);
-  QList<DatumP> *astFromList(List *aList);
+  QList<DatumP> *astFromList(List *aList, QList<DatumP> *aDest);
 
   DatumP createProcedure(DatumP cmd, DatumP text, DatumP sourceText);
   void defineProcedure(DatumP cmd, DatumP procnameP, DatumP text,

@@ -199,7 +199,7 @@ DatumP Kernel::registerError(DatumP anError, bool allowErract,
       e->procedure = currentProcedure;
       e->instructionLine = currentLine;
     }
-    DatumP erractP = variables.datumForName(erract);
+    DatumP erractP = datumForName(erract);
     bool shouldPause = (currentProcedure != nothing) &&
         (erractP != nothing) && (erractP.datumValue()->size() > 0);
 
@@ -277,6 +277,8 @@ Kernel::Kernel() {
   writeStream = NULL;
   systemWriteStream = NULL;
 
+  logoObject = new Object();
+  currentObject = DatumP(logoObject);
   turtle = new Turtle;
   parser = new Parser(this);
   ProcedureHelper::setParser(parser);
@@ -546,7 +548,7 @@ DatumP Kernel::executeLiteral(DatumP node) {
 DatumP Kernel::executeValueOf(DatumP node) {
   DatumP varnameP = node.astnodeValue()->childAtIndex(0);
   QString varName = varnameP.wordValue()->keyValue();
-  DatumP retval = variables.datumForName(varName);
+  DatumP retval = datumForName(varName);
   if (retval == nothing)
     return (Error::noValueRecoverable(varnameP));
   return retval;
@@ -570,6 +572,11 @@ SignalsEnum_t Kernel::interruptCheck()
 DatumP Kernel::runList(DatumP listP, const QString startTag) {
   bool shouldSearchForTag = (startTag != "");
   DatumP retval;
+  QList<DatumP> objectParsedList;
+
+  QList<DatumP> *parsedListP = &objectParsedList;
+  if (currentObject.objectValue() == logoObject)
+    parsedListP = NULL;
 
   interruptCheck();
 
@@ -582,18 +589,18 @@ DatumP Kernel::runList(DatumP listP, const QString startTag) {
 
   bool tagHasBeenFound = !shouldSearchForTag;
 
-  QList<DatumP> *parsedList = parser->astFromList(listP.listValue());
-  for (int i = 0; i < parsedList->size(); ++i) {
+  parsedListP = parser->astFromList(listP.listValue(), parsedListP);
+  for (int i = 0; i < parsedListP->size(); ++i) {
     if (retval != nothing) {
       if (retval.isASTNode()) {
         return retval;
       }
       Error::dontSay(retval);
     }
-    DatumP statement = (*parsedList)[i];
+    DatumP statement = (*parsedListP)[i];
     KernelMethod method = statement.astnodeValue()->kernel;
     if (tagHasBeenFound) {
-        if (isRunningMacroResult && (method == &Kernel::executeMacro) && (i == parsedList->size()-1)) {
+        if (isRunningMacroResult && (method == &Kernel::executeMacro) && (i == parsedListP->size()-1)) {
             return statement;
         }
       retval = (this->*method)(statement);
