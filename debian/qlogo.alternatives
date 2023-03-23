@@ -1,9 +1,9 @@
 Name: logo
 Link: /usr/bin/logo
-Alternative: /usr/bin/QLogo
+Alternative: /usr/bin/qlogo
 Priority: 20
 
 Name: logo
 Link: /usr/bin/logo
-Alternative: /usr/bin/QLogo-cli
+Alternative: /usr/bin/QLogo-GUI
 Priority: 15

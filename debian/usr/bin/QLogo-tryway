@@ -1,6 +1,6 @@
 #! /bin/sh -f
 
-e=/usr/bin/QLogo
+e=/usr/bin/QLogo-GUI
 
 yes_way=false
 

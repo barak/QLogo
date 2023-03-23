@@ -8,5 +8,5 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
 execute_after_dh_auto_install:
 	mkdir --verbose -p debian/qlogo/usr/bin
-	mv --verbose debian/qlogo/usr/QLogo-cli debian/qlogo/usr/bin/
-	mv --verbose debian/qlogo/usr/QLogo debian/qlogo/usr/bin/
+	mv --verbose debian/qlogo/usr/qlogo debian/qlogo/usr/bin/
+	mv --verbose debian/qlogo/usr/QLogo-GUI debian/qlogo/usr/bin/
