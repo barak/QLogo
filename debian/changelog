@@ -12,6 +12,7 @@ qlogo (0.94alpha3-1) UNRELEASED; urgency=medium
   * Update QLogo-tryway to qt6
   * Install upstream desktop file
   * Install upstream icon
+  * Update standards version to 4.6.2, no changes needed.
 
  -- Barak A. Pearlmutter <bap@debian.org>  Thu, 23 Mar 2023 14:13:33 +0000
 
