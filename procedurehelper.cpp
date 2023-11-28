@@ -29,8 +29,11 @@
 #include "error.h"
 #include "kernel.h"
 #include "parser.h"
+#include "datum_astnode.h"
+#include "datum_word.h"
 #include <QDebug>
 #include <math.h>
+#include "stringconstants.h"
 
 Parser *parser;
 
@@ -82,11 +85,11 @@ ProcedureHelper::~ProcedureHelper() {
     if (!isErroring) {
       if (returnValue == nothing) {
         parent->sysPrint(indent() + node->nodeName.wordValue()->printValue() +
-                         " stops\n");
+                         k._stops());
       } else {
         parent->sysPrint(indent() + node->nodeName.wordValue()->printValue() +
-                         " outputs " + returnValue.datumValue()->printValue() +
-                         "\n");
+                         k._outputs_() + returnValue.datumValue()->printValue() +
+                         '\n');
       }
     }
   }
@@ -114,11 +117,11 @@ double ProcedureHelper::validatedNumberAtIndex(int index, validatorD v,
   return 0;
 }
 
-long ProcedureHelper::validatedIntegerAtIndex(int index, validatorI v) {
+int ProcedureHelper::validatedIntegerAtIndex(int index, validatorI v) {
   DatumP retvalP = wordAtIndex(index);
   forever {
     double retvalD = retvalP.wordValue()->numberValue();
-    long retvalI = (long)retvalD;
+    int retvalI = (int)retvalD;
     if (retvalP.wordValue()->didNumberConversionSucceed() &&
         (floor(retvalD) == retvalD) && v(retvalI))
       return retvalI;
@@ -152,20 +155,13 @@ DatumP ProcedureHelper::wordAtIndex(int index, bool canRunlist) {
   return retval;
 }
 
-DatumP ProcedureHelper::objectAtIndex(int index, bool canRunlist) {
-  DatumP retval = datumAtIndex(index, canRunlist);
-  while (!retval.isObject())
-    retval = reject(retval, true, true);
-  return retval;
-}
-
 bool ProcedureHelper::boolAtIndex(int index, bool canRunlist) {
   DatumP retval = wordAtIndex(index, canRunlist);
   forever {
     QString word = retval.wordValue()->keyValue();
-    if (word == "TRUE")
+    if (word == k.kctrue())
       return true;
-    if (word == "FALSE")
+    if (word == k.kcfalse())
       return false;
     do {
       retval = reject(retval, true, true);
@@ -201,11 +197,11 @@ double ProcedureHelper::numberAtIndex(int index, bool canRunList) {
   return 0;
 }
 
-long ProcedureHelper::integerAtIndex(int index) {
+int ProcedureHelper::integerAtIndex(int index) {
   DatumP retvalP = datumAtIndex(index);
   forever {
     double retvalD = retvalP.wordValue()->numberValue();
-    long retval = (long)retvalD;
+    int retval = (int)retvalD;
     if (retvalP.wordValue()->didNumberConversionSucceed() &&
         (floor(retvalD) == retvalD))
       return retval;
@@ -237,6 +233,24 @@ DatumP ProcedureHelper::ret(DatumP aVal) {
 }
 
 DatumP ProcedureHelper::ret(bool aVal) {
+  returnValue = DatumP(aVal);
+  return returnValue;
+}
+
+
+DatumP ProcedureHelper::ret(int aVal) {
+  returnValue = DatumP(aVal);
+  return returnValue;
+}
+
+
+DatumP ProcedureHelper::ret(double aVal) {
+  returnValue = DatumP(aVal);
+  return returnValue;
+}
+
+
+DatumP ProcedureHelper::ret(QString aVal) {
   returnValue = DatumP(aVal);
   return returnValue;
 }

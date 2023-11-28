@@ -25,7 +25,10 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum.h"
+#include "datum_iterator.h"
+#include "datum_list.h"
+#include "datum_word.h"
+
 #include <qdebug.h>
 
 /******************************************
@@ -80,23 +83,3 @@ ArrayIterator::ArrayIterator(QVector<DatumP> *aArray) {
 DatumP ArrayIterator::element() { return *arrayIter++; }
 
 bool ArrayIterator::elementExists() { return (arrayIter != end); }
-
-/******************************************
- *
- * WordIterator
- *
- ******************************************/
-
-WordIterator::WordIterator() {}
-
-WordIterator::WordIterator(Word *aWord) {
-  charIter = aWord->rawString.begin();
-  end = aWord->rawString.end();
-}
-
-DatumP WordIterator::element() {
-  const QChar &c = *charIter++;
-  return DatumP(new Word(c));
-}
-
-bool WordIterator::elementExists() { return (charIter != end); }

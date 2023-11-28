@@ -25,6 +25,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "kernel.h"
+#include "datum_word.h"
+#include "datum_astnode.h"
 
 
 #include <functional>
@@ -44,7 +46,7 @@ DatumP Kernel::excSum(DatumP node) {
     result += h.numberAtIndex(i);
   }
 
-  return h.ret(new Word(result));
+  return h.ret(result);
 }
 
 DatumP Kernel::excDifference(DatumP node) {
@@ -55,14 +57,14 @@ DatumP Kernel::excDifference(DatumP node) {
 
   double c = a - b;
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 DatumP Kernel::excMinus(DatumP node) {
   ProcedureHelper h(this, node);
   double a = h.numberAtIndex(0);
 
-  return h.ret(new Word(-a));
+  return h.ret(-a);
 }
 
 DatumP Kernel::excProduct(DatumP node) {
@@ -73,7 +75,7 @@ DatumP Kernel::excProduct(DatumP node) {
     result *= h.numberAtIndex(i);
   }
 
-  return h.ret(new Word(result));
+  return h.ret(result);
 }
 
 DatumP Kernel::excQuotient(DatumP node) {
@@ -92,32 +94,32 @@ DatumP Kernel::excQuotient(DatumP node) {
     c = 1 / a;
   }
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 DatumP Kernel::excRemainder(DatumP node) {
   ProcedureHelper h(this, node);
-  long a = h.integerAtIndex(0);
+  int a = h.integerAtIndex(0);
 
-  long b = h.validatedIntegerAtIndex(
-      1, [](long candidate) { return candidate != 0; });
+  int b = h.validatedIntegerAtIndex(
+      1, [](int candidate) { return candidate != 0; });
 
   double c = a % b;
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 DatumP Kernel::excModulo(DatumP node) {
   ProcedureHelper h(this, node);
-  long a = h.integerAtIndex(0);
+  int a = h.integerAtIndex(0);
 
-  long b = h.validatedIntegerAtIndex(
-      1, [](long candidate) { return candidate != 0; });
+  int b = h.validatedIntegerAtIndex(
+      1, [](int candidate) { return candidate != 0; });
 
-  long r = a % b;
+  int r = a % b;
   double c = (r * b < 0) ? r + b : r;
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 DatumP Kernel::excInt(DatumP node) {
@@ -126,7 +128,7 @@ DatumP Kernel::excInt(DatumP node) {
 
   double b = trunc(a);
 
-  return h.ret(new Word(b));
+  return h.ret(b);
 }
 
 DatumP Kernel::excRound(DatumP node) {
@@ -135,7 +137,7 @@ DatumP Kernel::excRound(DatumP node) {
 
   double b = round(a);
 
-  return h.ret(new Word(b));
+  return h.ret(b);
 }
 
 DatumP Kernel::excSqrt(DatumP node) {
@@ -145,7 +147,7 @@ DatumP Kernel::excSqrt(DatumP node) {
 
   double c = sqrt(a);
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 DatumP Kernel::excPower(DatumP node) {
@@ -161,7 +163,7 @@ DatumP Kernel::excPower(DatumP node) {
 
   double c = pow(a, b);
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 DatumP Kernel::excExp(DatumP node) {
@@ -170,7 +172,7 @@ DatumP Kernel::excExp(DatumP node) {
 
   double c = exp(a);
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 DatumP Kernel::excLog10(DatumP node) {
@@ -180,7 +182,7 @@ DatumP Kernel::excLog10(DatumP node) {
 
   double c = log10(a);
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 DatumP Kernel::excLn(DatumP node) {
@@ -190,7 +192,7 @@ DatumP Kernel::excLn(DatumP node) {
 
   double c = log(a);
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 DatumP Kernel::excSin(DatumP node) {
@@ -199,7 +201,7 @@ DatumP Kernel::excSin(DatumP node) {
 
   double c = sin(M_PI / 180 * a);
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 DatumP Kernel::excRadsin(DatumP node) {
@@ -208,7 +210,7 @@ DatumP Kernel::excRadsin(DatumP node) {
 
   double c = sin(a);
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 DatumP Kernel::excCos(DatumP node) {
@@ -217,7 +219,7 @@ DatumP Kernel::excCos(DatumP node) {
 
   double c = cos(M_PI / 180 * a);
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 DatumP Kernel::excRadcos(DatumP node) {
@@ -226,7 +228,7 @@ DatumP Kernel::excRadcos(DatumP node) {
 
   double c = cos(a);
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 DatumP Kernel::excArctan(DatumP node) {
@@ -235,13 +237,13 @@ DatumP Kernel::excArctan(DatumP node) {
   if (node.astnodeValue()->countOfChildren() == 1) {
     double c = atan(a) * 180 / M_PI;
 
-    return h.ret(new Word(c));
+    return h.ret(c);
   }
   double b = h.numberAtIndex(1);
 
   double c = atan2(b, a) * 180 / M_PI;
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 DatumP Kernel::excRadarctan(DatumP node) {
@@ -250,13 +252,13 @@ DatumP Kernel::excRadarctan(DatumP node) {
   if (node.astnodeValue()->countOfChildren() == 1) {
     double c = atan(a);
 
-    return h.ret(new Word(c));
+    return h.ret(c);
   }
   double b = h.numberAtIndex(1);
 
   double c = atan2(b, a);
 
-  return h.ret(new Word(c));
+  return h.ret(c);
 }
 
 // PREDICATES
@@ -295,38 +297,31 @@ DatumP Kernel::excRandom(DatumP node) {
   ProcedureHelper h(this, node);
   int start, end;
 
+  // If this assert fails then I need to rethink this part.
+  Q_ASSERT(sizeof(int) > sizeof(uint32_t));
+  const int qlogo_maxint = 0xffffffff; // Maximum value of uint32_t
+
   if (node.astnodeValue()->countOfChildren() == 1) {
     start = 0;
-    end = h.validatedIntegerAtIndex(0, [](long candidate) {
-      return (candidate >= 0) && (candidate < RAND_MAX);
+    end = h.validatedIntegerAtIndex(0, [](int candidate) {
+      return (candidate >= 0) && (candidate <= qlogo_maxint);
     });
-    end = end - 1;
+    if (end > 0)
+      end = end - 1;
   } else {
-    start = h.validatedIntegerAtIndex(0, [](long candidate) {
-      return (candidate >= 0) && (candidate < RAND_MAX);
+    start = h.validatedIntegerAtIndex(0, [](int candidate) {
+      return (candidate >= 0) && (candidate <= qlogo_maxint);
     });
-    end = h.validatedIntegerAtIndex(1, [=](long candidate) {
-      return (candidate >= 0) && (candidate < RAND_MAX) && (candidate > start);
+    end = h.validatedIntegerAtIndex(1, [=](int candidate) {
+      return (candidate <= qlogo_maxint) && (candidate >= start);
     });
   }
 
-  double result = randomFromRange(start, end);
+  double result = (double) randomFromRange( (uint32_t) start, (uint32_t) end);
 
-  return h.ret(new Word(result));
+  return h.ret(result);
 }
 
-DatumP Kernel::excRerandom(DatumP node) {
-  ProcedureHelper h(this, node);
-  if (h.countOfChildren() == 1) {
-    long seed = h.validatedIntegerAtIndex(0, [](long candidate) {
-      return (candidate >= 0) && (candidate < RAND_MAX);
-    });
-    srand(seed);
-  } else {
-    srand(0);
-  }
-  return nothing;
-}
 
 // PRINT FORMATTING
 
@@ -335,72 +330,72 @@ DatumP Kernel::excForm(DatumP node) {
   double num = h.numberAtIndex(0);
   double width = h.integerAtIndex(1);
   int precision = h.validatedIntegerAtIndex(
-      2, [](long candidate) { return candidate >= 0; });
+      2, [](int candidate) { return candidate >= 0; });
 
   QString retval = QString("%1").arg(num, width, 'f', precision);
 
-  return h.ret(new Word(retval));
+  return h.ret(retval);
 }
 
 // BITWISE OPERATORS
 
 DatumP Kernel::excBitand(DatumP node) {
   ProcedureHelper h(this, node);
-  long retval = -1;
+  int retval = -1;
 
   for (int i = 0; i < node.astnodeValue()->countOfChildren(); ++i) {
-    long a = h.integerAtIndex(i);
+    int a = h.integerAtIndex(i);
     retval &= a;
   }
 
-  return h.ret(new Word(retval));
+  return h.ret(retval);
 }
 
 DatumP Kernel::excBitor(DatumP node) {
   ProcedureHelper h(this, node);
-  long retval = 0;
+  int retval = 0;
 
   for (int i = 0; i < node.astnodeValue()->countOfChildren(); ++i) {
-    long a = h.integerAtIndex(i);
+    int a = h.integerAtIndex(i);
     retval |= a;
   }
 
-  return h.ret(new Word(retval));
+  return h.ret(retval);
 }
 
 DatumP Kernel::excBitxor(DatumP node) {
   ProcedureHelper h(this, node);
-  long retval = 0;
+  int retval = 0;
 
   for (int i = 0; i < node.astnodeValue()->countOfChildren(); ++i) {
-    long a = h.integerAtIndex(i);
+    int a = h.integerAtIndex(i);
     retval ^= a;
   }
 
-  return h.ret(new Word(retval));
+  return h.ret(retval);
 }
 
 DatumP Kernel::excBitnot(DatumP node) {
   ProcedureHelper h(this, node);
-  long a = h.integerAtIndex(0);
-  long retval = ~a;
-  return h.ret(new Word(retval));
+  int a = h.integerAtIndex(0);
+  int retval = ~a;
+  return h.ret(retval);
 }
 
 DatumP Kernel::excAshift(DatumP node) {
   ProcedureHelper h(this, node);
-  long a = h.integerAtIndex(0);
-  long e = h.integerAtIndex(1);
-  long retval = (e < 0) ? a >> -e : a << e;
-  return h.ret(new Word(retval));
+  int a = h.integerAtIndex(0);
+  int e = h.integerAtIndex(1);
+  int retval = (e < 0) ? a >> -e : a << e;
+  return h.ret(retval);
 }
 
 DatumP Kernel::excLshift(DatumP node) {
   ProcedureHelper h(this, node);
-  unsigned long a = h.integerAtIndex(0);
-  long e = h.integerAtIndex(1);
-  unsigned long retval = (e < 0) ? a >> -e : a << e;
-  return h.ret(new Word(retval));
+  unsigned int a = h.integerAtIndex(0);
+  int e = h.integerAtIndex(1);
+  unsigned int retval = (e < 0) ? a >> -e : a << e;
+  return h.ret((int)retval);
 }
 
 // LOGICAL OPERATIONS

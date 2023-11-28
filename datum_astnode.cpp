@@ -25,8 +25,11 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum.h"
+#include "datum_astnode.h"
 #include <qdebug.h>
+
+
+static DatumPool<ASTNode> pool(40);
 
 void ASTNode::addChild(DatumP aChild) { children.push_back(aChild); }
 
@@ -34,23 +37,32 @@ int ASTNode::countOfChildren() { return (int)children.size(); }
 
 DatumP ASTNode::childAtIndex(unsigned index) { return children.at(index); }
 
-ASTNode::ASTNode(DatumP aNodeName) {
-  nodeName = aNodeName;
+
+ASTNode * ASTNode::alloc(DatumP aNodeName) {
+    ASTNode *retval = (ASTNode *)pool.alloc();
+    retval->children.clear();
+    retval->nodeName = aNodeName;
+    retval->kernel = NULL;
+    return retval;
 }
 
-ASTNode::ASTNode(const char *aNodeName) {
-  nodeName = DatumP(new Word(aNodeName));
+
+ASTNode * ASTNode::alloc(QString aNodeName) {
+    return alloc(DatumP(aNodeName));
 }
 
 ASTNode::~ASTNode() {
 }
 
+void ASTNode::addToPool()
+{
+    nodeName = nothing;
+    children.clear();
+    pool.dealloc(this);
+}
+
 Datum::DatumType ASTNode::isa() { return astnodeType; }
 
-QString ASTNode::name(void) {
-  static const QString retval("ASTNode");
-  return retval;
-}
 
 QString ASTNode::printValue(bool, int, int) {
   QString retval = QString("( %1").arg(nodeName.showValue());
@@ -63,5 +75,5 @@ QString ASTNode::printValue(bool, int, int) {
 
 QString ASTNode::showValue(bool, int, int) { return printValue(); }
 
-DatumP ASTNode::first() { return nothing; }
+
 

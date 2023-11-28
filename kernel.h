@@ -26,12 +26,12 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum.h"
+#include "datum_datump.h"
 
 #include "procedurehelper.h"
 #include "propertylists.h"
 #include "vars.h"
-#include "constants.h"
+#include "sharedconstants.h"
 
 #include <QColor>
 #include <QFile>
@@ -51,7 +51,7 @@ class Kernel {
   Parser *parser;
   Vars variables;
   DatumP filePrefix;
-  long repcount = -1;
+  int repcount = -1;
   int pauseLevel = 0;
   int procedureIterationDepth = 0;
   bool isRunningMacroResult = false;
@@ -75,6 +75,7 @@ class Kernel {
   DatumP readWordWithPrompt(const QString prompt, QTextStream *stream);
 
   DatumP currentError;
+  DatumP currentProcedure;
   DatumP currentLine;
   DatumP callingProcedure;
   DatumP callingLine;
@@ -94,7 +95,7 @@ class Kernel {
   void inputProcedure(DatumP nodeP);
 
   bool colorFromDatumP(QColor &retval, DatumP colorP);
-  long randomFromRange(long start, long end);
+  uint32_t randomFromRange(uint32_t start, uint32_t end);
 
   QString filepathForFilename(DatumP filenameP);
   QTextStream *openFileStream(DatumP filenameP, QIODevice::OpenMode mode);
@@ -118,9 +119,6 @@ class Kernel {
   /// Check for interrupts and handle them accordingly.
   SignalsEnum_t interruptCheck();
 
-  DatumP datumForName(const QString &name);
-  void setDatumForName(DatumP &aDatum, const QString &name);
-
 public:
   Kernel();
   ~Kernel();
@@ -133,10 +131,6 @@ public:
   DatumP pause();
 
   Turtle *turtle;
-  Object *logoObject;
-  DatumP currentObject;
-  DatumP currentProcedure;
-
   bool isInputRedirected();
   void initLibrary();
 
@@ -302,7 +296,6 @@ public:
   DatumP excForm(DatumP node);
 
   DatumP excRandom(DatumP node);
-  DatumP excRerandom(DatumP node);
 
   DatumP excMinus(DatumP node);
 
@@ -447,24 +440,6 @@ public:
   DatumP excTag(DatumP);
   DatumP excGoto(DatumP node);
   DatumP excGotoToken(DatumP);
-
-  // Objects
-
-  DatumP excSomething(DatumP);
-  DatumP excKindof(DatumP node);
-  DatumP excAsk(DatumP node);
-  DatumP excSelf(DatumP node);
-  DatumP excLogo(DatumP node);
-  DatumP excParents(DatumP node);
-  DatumP excHave(DatumP node);
-  DatumP excHavemake(DatumP node);
-  DatumP excMynames(DatumP node);
-  DatumP excMynamep(DatumP node);
-  DatumP excWhosename(DatumP node);
-  DatumP excMyprocs(DatumP node);
-  DatumP excMyprocp(DatumP node);
-  DatumP excWhoseproc(DatumP node);
-  DatumP excAncestors(DatumP node);
 
   // TEMPLATE-BASED ITERATION
 

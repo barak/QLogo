@@ -25,8 +25,12 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum.h"
+#include "datum_word.h"
+#include "datum_datump.h"
+#include "stringconstants.h"
 #include <qdebug.h>
+
+static DatumPool<Word> pool(50);
 
 QChar rawToChar(const QChar &src) {
   const ushort rawToAsciiMap[] = {
@@ -67,78 +71,111 @@ QChar charToRaw(const QChar &src) {
   return src;
 }
 
-Word::Word() { dirtyFlag = stringIsDirty; }
+Word::Word() {
+  numberIsValid = false;
+  rawStringIsValid = false;
+  keyStringIsValid = false;
+  printableStringIsValid = false;
+}
 
-Word::Word(const QString other, bool aIsForeverSpecial, bool canBeDestroyed) {
-  dirtyFlag = stringIsDirty;
-  isForeverSpecial = aIsForeverSpecial;
-  isDestroyable = canBeDestroyed;
+Word * Word::alloc(const QString other, bool aIsForeverSpecial) {
+  Word * retval = (Word *) pool.alloc();
+  retval->numberIsValid = false;
+  retval->rawStringIsValid = true;
+  retval->keyStringIsValid = false;
+  retval->printableStringIsValid = false;
+  retval->sourceIsNumber = false;
+  retval->isForeverSpecial = aIsForeverSpecial;
 
-  rawString = other;
-  printableString = rawString;
-  for (int i = 0; i < printableString.size(); ++i) {
-    QChar s = printableString[i];
-    QChar d = rawToChar(s);
-    if (s != d)
-      printableString[i] = d;
+  retval->rawString = other;
+  return retval;
+}
+
+Word * Word::alloc(double other) {
+  Word * retval = (Word *) pool.alloc();
+  retval->number = other;
+  retval->numberIsValid = true;
+  retval->rawStringIsValid = false;
+  retval->keyStringIsValid = false;
+  retval->printableStringIsValid = false;
+  retval->sourceIsNumber = true;
+  return retval;
+}
+
+
+void Word::genRawString()
+{
+  if ( ! rawStringIsValid) {
+    Q_ASSERT(numberIsValid);
+    rawString.setNum(number);
+    rawStringIsValid = true;
   }
 }
 
-Word::Word(double other) {
-  number = other;
-  dirtyFlag = numberIsDirty;
+
+
+void Word::genPrintString()
+{
+  if ( ! printableStringIsValid) {
+    genRawString();
+    printableString = rawString;
+    rawToChar(printableString);
+    printableStringIsValid = true;
+  }
+}
+
+
+void Word::genKeyString()
+{
+  if ( ! keyStringIsValid) {
+    genPrintString();
+    keyString = printableString;
+    for (int i = 0; i < keyString.size(); ++i) {
+      QChar s = printableString[i];
+      QChar d = s.toUpper();
+      if (s != d)
+          keyString[i] = d;
+    }
+    keyStringIsValid = true;
+  }
 }
 
 Datum::DatumType Word::isa() { return wordType; }
 
 QString Word::name() {
-  static QString retval("Word");
-  return retval;
+  return k.word();
 }
 
-Word::~Word() {}
+void Word::addToPool()
+{
+  pool.dealloc(this);
+}
 
 QString Word::keyValue() {
-  if (dirtyFlag == numberIsDirty)
-    rawValue();
-  if ((keyString.size() == 0) && (printableString.size() != 0)) {
-    keyString = printableString;
-    for (int i = 0; i < keyString.size(); ++i) {
-      QChar s = keyString[i];
-      QChar d = s.toUpper();
-      if (s != d)
-        keyString[i] = d;
-    }
-  }
+  genKeyString();
   return keyString;
 }
 
 QString Word::rawValue() {
-  if (dirtyFlag == numberIsDirty) {
-    rawString.setNum(number);
-    printableString = rawString;
-    dirtyFlag = allClean;
-  }
+  genRawString();
   return rawString;
 }
 
 double Word::numberValue() {
-  if (dirtyFlag == stringIsDirty) {
-    number = printableString.toDouble(&numberConversionSucceeded);
-    if (numberConversionSucceeded)
-      dirtyFlag = allClean;
+  if ( ! numberIsValid) {
+    genPrintString();
+    number = printableString.toDouble(&numberIsValid);
   }
   return number;
 }
 
 bool Word::didNumberConversionSucceed() {
-  return numberConversionSucceeded || (dirtyFlag != stringIsDirty);
+  return numberIsValid;
 }
 
 QString Word::printValue(bool fullPrintp, int printDepthLimit,
                          int printWidthLimit) {
-  if ((dirtyFlag == numberIsDirty) || (dirtyFlag == allClean))
-    return rawValue();
+  genPrintString();
   if (!fullPrintp && (printDepthLimit != 0) && (printWidthLimit < 0))
     return printableString;
   if (printDepthLimit == 0)
@@ -151,6 +188,8 @@ QString Word::printValue(bool fullPrintp, int printDepthLimit,
       return printableString.left(printWidthLimit) + "...";
     return printableString;
   }
+
+  // TODO: should this be the same as "unread"?
   QString temp = rawString;
   QString retval;
   if (temp.size() == 0)
@@ -188,47 +227,47 @@ QString Word::showValue(bool fullPrintp, int printDepthLimit,
 }
 
 int Word::size() {
-  rawValue();
-  return rawString.size();
+  genPrintString();
+  return printableString.size();
 }
 
 bool Word::isEqual(DatumP other, bool ignoreCase) {
-  if (dirtyFlag != stringIsDirty) {
+  if (sourceIsNumber) {
     bool answer = (number == other.wordValue()->numberValue());
     if (!other.wordValue()->didNumberConversionSucceed())
       return false;
     return answer;
   }
-  if (other.wordValue()->dirtyFlag != stringIsDirty) {
+  if (other.wordValue()->sourceIsNumber) {
     bool answer = (numberValue() == other.wordValue()->numberValue());
     if (!didNumberConversionSucceed())
       return false;
     return answer;
   }
-  if (ignoreCase) {
-    return rawValue().toUpper() == other.wordValue()->rawValue().toUpper();
-  }
-  return rawValue() == other.wordValue()->rawValue();
+  genPrintString();
+  Qt::CaseSensitivity cs = ignoreCase ? Qt::CaseInsensitive : Qt::CaseSensitive;
+  return printableString.compare(other.wordValue()->printValue(), cs) == 0;
 }
 
 bool Word::isIndexInRange(int anIndex) {
   --anIndex;
-  rawValue();
-  return ((anIndex >= 0) && (anIndex < rawString.size()));
+  genPrintString();
+  return ((anIndex >= 0) && (anIndex < printableString.size()));
 }
 
 DatumP Word::datumAtIndex(int anIndex) {
-  Q_ASSERT(isIndexInRange(anIndex));
+  genPrintString();
   --anIndex;
-  return DatumP(new Word(rawString.mid(anIndex, 1)));
+  Q_ASSERT((anIndex >= 0) && (anIndex < printableString.size()));
+  return DatumP(printableString.mid(anIndex, 1));
 }
 
 bool Word::containsDatum(DatumP aDatum, bool ignoreCase) {
   if (!aDatum.isWord())
     return false;
-  rawValue();
+  genPrintString();
   Qt::CaseSensitivity cs = ignoreCase ? Qt::CaseInsensitive : Qt::CaseSensitive;
-  return rawString.contains(aDatum.wordValue()->rawValue(), cs);
+  return printableString.contains(aDatum.wordValue()->printValue(), cs);
 }
 
 bool Word::isMember(DatumP aDatum, bool ignoreCase) {
@@ -236,38 +275,37 @@ bool Word::isMember(DatumP aDatum, bool ignoreCase) {
 }
 
 DatumP Word::fromMember(DatumP aDatum, bool ignoreCase) {
-  rawValue();
+  genPrintString();
   Qt::CaseSensitivity cs = ignoreCase ? Qt::CaseInsensitive : Qt::CaseSensitive;
-  const QString &searchString = aDatum.wordValue()->rawValue();
-  int pos = rawString.indexOf(searchString, 0, cs);
+  const QString &searchString = aDatum.wordValue()->printValue();
+  int pos = printableString.indexOf(searchString, 0, cs);
   QString retval;
   if (pos >= 0) {
-    retval = rawString.right(rawString.size() - pos);
+    retval = printableString.right(rawString.size() - pos);
   }
-  return DatumP(new Word(retval));
-}
-
-DatumP Word::first() {
-  rawValue();
-  Q_ASSERT(rawString.size() > 0);
-  return DatumP(new Word(QString(rawString[0])));
-}
-
-DatumP Word::last() {
-  rawValue();
-  Q_ASSERT(rawString.size() > 0);
-  return DatumP(new Word(QString(rawString[rawString.size() - 1])));
-}
-
-DatumP Word::butlast() {
-  const QString &w = rawValue();
-  Word *retval = new Word(w.left(w.size() - 1));
   return DatumP(retval);
 }
 
+DatumP Word::first() {
+  genPrintString();
+  Q_ASSERT(printableString.size() > 0);
+  return DatumP(QString(printableString[0]));
+}
+
+DatumP Word::last() {
+  genPrintString();
+  Q_ASSERT(printableString.size() > 0);
+  return DatumP(QString(printableString[printableString.size() - 1]));
+}
+
+DatumP Word::butlast() {
+  genPrintString();
+  return DatumP(printableString.left(printableString.size() - 1));
+}
+
 DatumP Word::butfirst() {
-  rawValue();
-  Q_ASSERT(rawString.size() > 0);
-  return DatumP(new Word(rawString.right(rawString.size() - 1)));
+  genPrintString();
+  Q_ASSERT(printableString.size() > 0);
+  return DatumP(printableString.right(printableString.size() - 1));
 }
 

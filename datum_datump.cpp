@@ -26,12 +26,11 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum.h"
+#include "datum_datump.h"
+#include "datum_word.h"
+#include "datum_list.h"
+#include "stringconstants.h"
 #include <qdebug.h>
-
-Word trueWord("true", false, false);
-Word falseWord("false", false, false);
-
 
 DatumP::DatumP() { d = &notADatum; }
 
@@ -49,14 +48,35 @@ DatumP::DatumP(const DatumP &other) noexcept {
   }
 }
 
-DatumP::DatumP(bool b) { d = b ? &trueWord : &falseWord; }
+DatumP::DatumP(bool b) {
+  d = Word::alloc(b ? k.ktrue() : k.kfalse());
+  d -> retain();
+}
+
+
+DatumP::DatumP(double n)
+{
+  d = Word::alloc(n);
+  d->retain();
+}
+
+
+DatumP::DatumP(int n)
+{
+  d = Word::alloc((double)n);
+  d->retain();
+}
+
+
+DatumP::DatumP(const QString n, bool isVBarred)
+{
+  d = Word::alloc(n, isVBarred);
+  d->retain();
+}
 
 void DatumP::destroy() {
   if (d != &notADatum) {
     d->release();
-    if (d->shouldDelete()) {
-      delete d;
-    }
   }
 }
 
@@ -107,8 +127,6 @@ bool DatumP::isList() { return d->isa() == Datum::listType; }
 
 bool DatumP::isArray() { return d->isa() == Datum::arrayType; }
 
-bool DatumP::isObject() { return d->isa() == Datum::objectType; }
-
 bool DatumP::isWord() { return d->isa() == Datum::wordType; }
 
 bool DatumP::isError() { return d->isa() == Datum::errorType; }
@@ -140,14 +158,6 @@ Array *DatumP::arrayValue() {
   Q_ASSERT(d->isa() == Datum::arrayType);
   return (Array *)d;
 }
-
-Object *DatumP::objectValue() {
-  if (d->isa() != Datum::objectType)
-    qDebug() <<"Not an object";
-  Q_ASSERT(d->isa() == Datum::objectType);
-  return (Object *)d;
-}
-
 
 Procedure *DatumP::procedureValue() {
   if (d->isa() != Datum::procedureType) {

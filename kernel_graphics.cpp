@@ -27,7 +27,10 @@
 #include "error.h"
 #include "kernel.h"
 #include "turtle.h"
-
+#include "datum_word.h"
+#include "datum_list.h"
+#include "datum_astnode.h"
+#include "stringconstants.h"
 #include "logocontroller.h"
 
 #include <math.h>
@@ -37,11 +40,23 @@
 #endif
 
 DatumP listFromColor(QColor c) {
-  List *retval = new List;
-  retval->append(DatumP(new Word(round(c.redF() * 100))));
-  retval->append(DatumP(new Word(round(c.greenF() * 100))));
-  retval->append(DatumP(new Word(round(c.blueF() * 100))));
+  List *retval = List::alloc();
+  retval->append(DatumP(round(c.redF() * 100)));
+  retval->append(DatumP(round(c.greenF() * 100)));
+  retval->append(DatumP(round(c.blueF() * 100)));
   return DatumP(retval);
+}
+
+char axisFromDatump(DatumP candidate)
+{
+  if (!candidate.isWord())
+      return 0;
+  if (candidate.wordValue()->rawValue().size() != 1)
+      return 0;
+  char retval = candidate.wordValue()->keyValue()[0].toLatin1();
+  if ((retval != 'X') && (retval != 'Y') && (retval != 'Z'))
+      return 0;
+  return retval;
 }
 
 // TURTLE MOTION
@@ -159,13 +174,11 @@ DatumP Kernel::excSetheading(DatumP node) {
   char axis = 'Z';
   if (node.astnodeValue()->countOfChildren() == 2) {
     h.validatedDatumAtIndex(1, [&axis](DatumP candidate) {
-      if (!candidate.isWord())
-        return false;
-      QString aS = candidate.wordValue()->keyValue();
-      if ((aS != "X") && (aS != "Y") && (aS != "Z"))
-        return false;
-      axis = aS[0].toLatin1();
-      return true;
+        char cAxis = axisFromDatump(candidate);
+        if (cAxis == 0)
+            return false;
+        axis = cAxis;
+        return true;
     });
   }
   double oldHeading = mainTurtle()->getHeading(axis);
@@ -182,7 +195,7 @@ DatumP Kernel::excHome(DatumP node) {
   ProcedureHelper h(this, node);
   mainTurtle()->home();
 
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excArc(DatumP node) {
@@ -209,11 +222,11 @@ DatumP Kernel::excPos(DatumP node) {
   double x, y, z;
   mainTurtle()->getxyz(x, y, z);
 
-  List *retval = new List;
-  retval->append(DatumP(new Word(x)));
-  retval->append(DatumP(new Word(y)));
+  List *retval = List::alloc();
+  retval->append(DatumP(x));
+  retval->append(DatumP(y));
   if (h.countOfChildren() > 0) {
-    retval->append(DatumP(new Word(z)));
+    retval->append(DatumP(z));
   }
   return h.ret(retval);
 }
@@ -223,12 +236,10 @@ DatumP Kernel::excHeading(DatumP node) {
   char axis = 'Z';
   if (node.astnodeValue()->countOfChildren() == 2) {
     h.validatedDatumAtIndex(1, [&axis](DatumP candidate) {
-      if (!candidate.isWord())
+      char cAxis = axisFromDatump(candidate);
+      if (cAxis == 0)
         return false;
-      QString aS = candidate.wordValue()->keyValue();
-      if ((aS != "X") && (aS != "Y") && (aS != "Z"))
-        return false;
-      axis = aS[0].toLatin1();
+      axis = cAxis;
       return true;
     });
   }
@@ -238,7 +249,7 @@ DatumP Kernel::excHeading(DatumP node) {
   if (retval > 0)
       retval = 360 - retval;
 
-  return h.ret(new Word(retval));
+  return h.ret(retval);
 }
 
 DatumP Kernel::excTowards(DatumP node) {
@@ -263,14 +274,14 @@ DatumP Kernel::excTowards(DatumP node) {
   if (retval > 0)
       retval = 360 - retval;
 
-  return h.ret(new Word(retval));
+  return h.ret(retval);
 }
 
 DatumP Kernel::excScrunch(DatumP node) {
   ProcedureHelper h(this, node);
-  List *retval = new List;
-  retval->append(DatumP(new Word(1)));
-  retval->append(DatumP(new Word(1)));
+  List *retval = List::alloc();
+  retval->append(DatumP(1));
+  retval->append(DatumP(1));
   return h.ret(retval);
 }
 
@@ -281,7 +292,7 @@ DatumP Kernel::excShowturtle(DatumP node) {
   mainTurtle()->setIsTurtleVisible(true);
   mainController()->setTurtleIsVisible(true);
 
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excHideturtle(DatumP node) {
@@ -289,21 +300,21 @@ DatumP Kernel::excHideturtle(DatumP node) {
   mainTurtle()->setIsTurtleVisible(false);
   mainController()->setTurtleIsVisible(false);
 
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excClean(DatumP node) {
   ProcedureHelper h(this, node);
   mainTurtle()->home(false);
   mainController()->clearScreen();
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excClearscreen(DatumP node) {
   ProcedureHelper h(this, node);
   mainController()->clearScreen();
 
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excWrap(DatumP node) {
@@ -317,7 +328,7 @@ DatumP Kernel::excWrap(DatumP node) {
         mainController()->clearScreen();
     }
   }
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excWindow(DatumP node) {
@@ -327,7 +338,7 @@ DatumP Kernel::excWindow(DatumP node) {
     mainTurtle()->setMode(newMode);
     mainController()->setIsCanvasBounded(false);
   }
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excFence(DatumP node) {
@@ -341,7 +352,7 @@ DatumP Kernel::excFence(DatumP node) {
         mainController()->clearScreen();
     }
   }
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excBounds(DatumP node) {
@@ -349,9 +360,9 @@ DatumP Kernel::excBounds(DatumP node) {
   double x = mainController()->boundX();
   double y = mainController()->boundY();
 
-  List *retval = new List;
-  retval->append(new Word(x));
-  retval->append(new Word(y));
+  List *retval = List::alloc();
+  retval->append(DatumP(x));
+  retval->append(DatumP(y));
   return h.ret(retval);
 }
 
@@ -379,13 +390,13 @@ DatumP Kernel::excFilled(DatumP node) {
   mainTurtle()->beginFillWithColor(c);
   DatumP retval;
   try {
-    retval = h.ret(runList(commandList));
+    retval = runList(commandList);
   } catch (Error *e) {
     mainTurtle()->endFill();
     throw e;
   }
   mainTurtle()->endFill();
-  return retval;
+  return h.ret(retval);
 }
 
 DatumP Kernel::excLabel(DatumP node) {
@@ -409,19 +420,19 @@ DatumP Kernel::excSetlabelheight(DatumP node) {
 DatumP Kernel::excTextscreen(DatumP node) {
   ProcedureHelper h(this, node);
   mainController()->setScreenMode(textScreenMode);
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excFullscreen(DatumP node) {
   ProcedureHelper h(this, node);
   mainController()->setScreenMode(fullScreenMode);
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excSplitscreen(DatumP node) {
   ProcedureHelper h(this, node);
   mainController()->setScreenMode(splitScreenMode);
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excSetscrunch(DatumP node) {
@@ -443,18 +454,18 @@ DatumP Kernel::excScreenmode(DatumP node) {
   switch (mainController()->getScreenMode()) {
   case textScreenMode:
   case initScreenMode:
-    retval = "textscreen";
+    retval = k.textscreen();
     break;
   case fullScreenMode:
-    retval = "fullscreen";
+    retval = k.fullscreen();
     break;
   case splitScreenMode:
-    retval = "splitscreen";
+    retval = k.splitscreen();
     break;
   default:
     break;
   }
-  return h.ret(new Word(retval));
+  return h.ret(retval);
 }
 
 DatumP Kernel::excTurtlemode(DatumP node) {
@@ -462,36 +473,36 @@ DatumP Kernel::excTurtlemode(DatumP node) {
   QString retval;
   switch (mainTurtle()->getMode()) {
   case turtleWrap:
-    retval = "wrap";
+    retval = k.wrap();
     break;
   case turtleFence:
-    retval = "fence";
+    retval = k.fence();
     break;
   case turtleWindow:
-    retval = "window";
+    retval = k.window();
     break;
   default:
     qDebug() << "what mode is the turtle?";
     Q_ASSERT(false);
     break;
   }
-  return h.ret(new Word(retval));
+  return h.ret(retval);
 }
 
 DatumP Kernel::excLabelheight(DatumP node) {
   ProcedureHelper h(this, node);
   double retval = mainController()->getLabelFontSize();
-  return h.ret(new Word(retval));
+  return h.ret(retval);
 }
 
 DatumP Kernel::excMatrix(DatumP node) {
   ProcedureHelper h(this, node);
-  List *retval = new List;
+  List *retval = List::alloc();
   const QMatrix4x4 &m = mainTurtle()->getMatrix();
   for (int row = 0; row < 4; ++row) {
-    List *r = new List;
+    List *r = List::alloc();
     for (int col = 0; col < 4; ++col) {
-      r->append(DatumP(new Word(m(row, col))));
+      r->append(DatumP(m(row, col)));
     }
     retval->append(DatumP(r));
   }
@@ -504,35 +515,35 @@ DatumP Kernel::excPendown(DatumP node) {
   ProcedureHelper h(this, node);
   mainTurtle()->setPenIsDown(true);
 
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excPenup(DatumP node) {
   ProcedureHelper h(this, node);
   mainTurtle()->setPenIsDown(false);
 
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excPenpaint(DatumP node) {
   ProcedureHelper h(this, node);
   mainTurtle()->setPenIsDown(true);
   mainTurtle()->setPenMode(penModePaint);
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excPenerase(DatumP node) {
   ProcedureHelper h(this, node);
   mainTurtle()->setPenIsDown(true);
   mainTurtle()->setPenMode(penModeErase);
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excPenreverse(DatumP node) {
   ProcedureHelper h(this, node);
   mainTurtle()->setPenIsDown(true);
   mainTurtle()->setPenMode(penModeReverse);
-  return h.ret();
+  return nothing;
 }
 
 DatumP Kernel::excSetpencolor(DatumP node) {
@@ -547,7 +558,7 @@ DatumP Kernel::excSetpencolor(DatumP node) {
 
 DatumP Kernel::excSetpalette(DatumP node) {
   ProcedureHelper h(this, node);
-  int colornumber = h.validatedIntegerAtIndex(0, [this](long candidate) {
+  int colornumber = h.validatedIntegerAtIndex(0, [this](int candidate) {
     return (candidate >= 8) && (candidate < palette.size());
   });
   QColor c;
@@ -590,19 +601,19 @@ DatumP Kernel::excPenmode(DatumP node) {
   QString retval;
   switch (pm) {
   case penModePaint:
-    retval = "paint";
+    retval = k.paint();
     break;
   case penModeReverse:
-    retval = "reverse";
+    retval = k.reverse();
     break;
   case penModeErase:
-    retval = "erase";
+    retval = k.erase();
     break;
   default:
     retval = "ERROR!!!";
     break;
   }
-  return h.ret(new Word(retval));
+  return h.ret(retval);
 }
 
 DatumP Kernel::excPencolor(DatumP node) {
@@ -613,7 +624,7 @@ DatumP Kernel::excPencolor(DatumP node) {
 
 DatumP Kernel::excPalette(DatumP node) {
   ProcedureHelper h(this, node);
-  int colornumber = h.validatedIntegerAtIndex(0, [this](long candidate) {
+  int colornumber = h.validatedIntegerAtIndex(0, [this](int candidate) {
     return (candidate >= 0) && (candidate < palette.size());
   });
   return h.ret(listFromColor(palette[colornumber]));
@@ -622,7 +633,7 @@ DatumP Kernel::excPalette(DatumP node) {
 DatumP Kernel::excPensize(DatumP node) {
   ProcedureHelper h(this, node);
   double retval = mainTurtle()->getPenSize();
-  return h.ret(new Word(retval));
+  return h.ret(retval);
 }
 
 DatumP Kernel::excBackground(DatumP node) {
@@ -651,19 +662,19 @@ DatumP Kernel::excSavepict(DatumP node) {
 
 DatumP Kernel::excMousepos(DatumP node) {
   ProcedureHelper h(this, node);
-  List *retval = new List;
+  List *retval = List::alloc();
   QVector2D position = mainController()->mousePosition();
-  retval->append(DatumP(new Word(position.x())));
-  retval->append(DatumP(new Word(position.y())));
+  retval->append(DatumP(position.x()));
+  retval->append(DatumP(position.y()));
   return h.ret(retval);
 }
 
 DatumP Kernel::excClickpos(DatumP node) {
   ProcedureHelper h(this, node);
-  List *retval = new List;
+  List *retval = List::alloc();
   QVector2D position = mainController()->lastMouseclickPosition();
-  retval->append(DatumP(new Word(position.x())));
-  retval->append(DatumP(new Word(position.y())));
+  retval->append(DatumP(position.x()));
+  retval->append(DatumP(position.y()));
   return h.ret(retval);
 }
 
@@ -674,5 +685,5 @@ DatumP Kernel::excButtonp(DatumP node) {
 
 DatumP Kernel::excButton(DatumP node) {
   ProcedureHelper h(this, node);
-  return h.ret(new Word(mainController()->getAndResetButtonID()));
+  return h.ret(mainController()->getAndResetButtonID());
 }

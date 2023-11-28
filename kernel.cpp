@@ -26,16 +26,20 @@
 
 #include "kernel.h"
 #include "parser.h"
+#include "datum_word.h"
+#include "datum_astnode.h"
 #include <QColor>
 #include <QFont>
 #include <QImage>
 #include <QApplication> // quit()
+#include <stdlib.h> // arc4random_uniform()
 
 #include "error.h"
 #include "library.h"
 #include "turtle.h"
 
 #include "logocontroller.h"
+#include "stringconstants.h"
 
 // The maximum depth of procedure iterations before error is thrown.
 const int maxIterationDepth = 1000;
@@ -158,11 +162,11 @@ bool Kernel::getLineAndRunIt(bool shouldHandleError) {
   } catch (Error *e) {
     if (shouldHandleError) {
       if (e->tag.isWord()) {
-          if (e->tag.wordValue()->keyValue() == "TOPLEVEL") {
+          if (e->tag.wordValue()->keyValue() == k.toplevel()) {
               sysPrint("\n");
               return true;
           }
-          if (e->tag.wordValue()->keyValue() == "SYSTEM") {
+          if (e->tag.wordValue()->keyValue() == k.system()) {
               sysPrint("\n");
               mainController()->systemStop();
               return false;
@@ -187,7 +191,6 @@ bool Kernel::getLineAndRunIt(bool shouldHandleError) {
 
 DatumP Kernel::registerError(DatumP anError, bool allowErract,
                              bool allowRecovery) {
-  const QString erract = "ERRACT";
   currentError = anError;
   ProcedureHelper::setIsErroring(anError != nothing);
   if (anError != nothing) {
@@ -199,7 +202,7 @@ DatumP Kernel::registerError(DatumP anError, bool allowErract,
       e->procedure = currentProcedure;
       e->instructionLine = currentLine;
     }
-    DatumP erractP = datumForName(erract);
+    DatumP erractP = variables.datumForName(k.erract());
     bool shouldPause = (currentProcedure != nothing) &&
         (erractP != nothing) && (erractP.datumValue()->size() > 0);
 
@@ -212,12 +215,12 @@ DatumP Kernel::registerError(DatumP anError, bool allowErract,
       DatumP retval = pause();
 
       if (retval == nothing)
-        Error::throwError(DatumP(new Word("TOPLEVEL")), nothing);
+        Error::throwError(DatumP(k.toplevel()), nothing);
       if (allowRecovery) {
         return retval;
       }
       sysPrint(
-          QString("You don't say what to do with %1").arg(retval.printValue()));
+          k.errNoSay().arg(retval.printValue()));
       return nothing;
     } else {
       throw anError.errorValue();
@@ -256,19 +259,16 @@ void Kernel::initLibrary() { executeText(libraryStr); }
 // TODO: System vars need standardization
 void Kernel::initVariables(void)
 {
-    const QString logoPlatform = "LOGOPLATFORM";
-    const QString logoVersion = "LOGOVERSION";
-    const QString allowGetSet = "ALLOWGETSET";
+    DatumP platform(LOGOPLATFORM);
+    DatumP version(LOGOVERSION);
+    DatumP trueDatumP(k.ktrue());
 
-    DatumP platform(new Word(LOGOPLATFORM));
-    DatumP version(new Word(LOGOVERSION));
-    DatumP trueDatumP(&trueWord);
-    variables.setDatumForName(platform, logoPlatform);
-    variables.setDatumForName(version, logoVersion);
-    variables.setDatumForName(trueDatumP, allowGetSet);
-    variables.bury(logoPlatform);
-    variables.bury(logoVersion);
-    variables.bury(allowGetSet);
+    variables.setDatumForName(platform, k.logoPlatform());
+    variables.setDatumForName(version, k.logoVersion());
+    variables.setDatumForName(trueDatumP, k.allowGetSet());
+    variables.bury(k.logoPlatform());
+    variables.bury(k.logoVersion());
+    variables.bury(k.allowGetSet());
 }
 
 Kernel::Kernel() {
@@ -277,8 +277,6 @@ Kernel::Kernel() {
   writeStream = NULL;
   systemWriteStream = NULL;
 
-  logoObject = new Object();
-  currentObject = DatumP(logoObject);
   turtle = new Turtle;
   parser = new Parser(this);
   ProcedureHelper::setParser(parser);
@@ -298,23 +296,12 @@ Kernel::~Kernel() {
   delete turtle;
 }
 
-// https://stackoverflow.com/questions/2509679/how-to-generate-a-random-number-from-within-a-range
-long Kernel::randomFromRange(long start, long end) {
-  long max = end - start;
+uint32_t Kernel::randomFromRange(uint32_t start, uint32_t end) {
+  uint32_t range = end - start + 1;
 
-  max = (max < RAND_MAX) ? max : RAND_MAX;
+  uint32_t x = arc4random_uniform(range);
 
-  unsigned long num_bins = (unsigned long)max + 1;
-  unsigned long num_rand = (unsigned long)RAND_MAX + 1;
-  unsigned long bin_size = num_rand / num_bins;
-  unsigned long defect = num_rand % num_bins;
-
-  long x;
-  do {
-    x = rand();
-  } while (num_rand - defect <= (unsigned long)x);
-
-  return x / bin_size + start;
+  return x + start;
 }
 
 DatumP Kernel::readRawLineWithPrompt(const QString prompt,
@@ -328,11 +315,11 @@ DatumP Kernel::readChar() {
   }
 
   if (readStream->atEnd())
-    return DatumP(new List);
+    return DatumP(List::alloc());
   QString line = readStream->read(1);
   if (readStream->status() != QTextStream::Ok)
     Error::fileSystem();
-  return DatumP(new Word(line));
+  return DatumP(line);
 }
 
 DatumP Kernel::readlistWithPrompt(const QString &prompt,
@@ -346,10 +333,10 @@ DatumP Kernel::readWordWithPrompt(const QString prompt, QTextStream *stream) {
 }
 
 void Kernel::makeVarLocal(const QString &varname) {
-  if (variables.currentScope() <= 1)
+  if (variables.size() <= 1)
     return;
   if (variables.isStepped(varname)) {
-    QString line = varname + " shadowed by local in procedure call";
+    QString line = varname + k.shadowed_by_local();
     if (currentProcedure != nothing) {
       line +=
           " in " +
@@ -398,7 +385,7 @@ DatumP Kernel::executeProcedureCore(DatumP node) {
   // Finally, take in the remainder (if any) as a list.
   if (proc.procedureValue()->restInput != "") {
     const QString &name = proc.procedureValue()->restInput;
-    DatumP remainderList = new List;
+    DatumP remainderList = DatumP(List::alloc());
     while (childIndex < h.countOfChildren()) {
       DatumP value = h.datumAtIndex(childIndex);
       remainderList.listValue()->append(value);
@@ -473,7 +460,7 @@ DatumP Kernel::executeProcedureCore(DatumP node) {
 }
 
 DatumP Kernel::executeProcedure(DatumP node) {
-  Scope s(&variables);
+  VarFrame s(&variables);
 
   if (procedureIterationDepth > maxIterationDepth) {
       Error::stackOverflow();
@@ -548,7 +535,7 @@ DatumP Kernel::executeLiteral(DatumP node) {
 DatumP Kernel::executeValueOf(DatumP node) {
   DatumP varnameP = node.astnodeValue()->childAtIndex(0);
   QString varName = varnameP.wordValue()->keyValue();
-  DatumP retval = datumForName(varName);
+  DatumP retval = variables.datumForName(varName);
   if (retval == nothing)
     return (Error::noValueRecoverable(varnameP));
   return retval;
@@ -559,12 +546,12 @@ SignalsEnum_t Kernel::interruptCheck()
     SignalsEnum_t latestSignal = mainController()->latestSignal();
     if (latestSignal == toplevelSignal) {
         if (currentProcedure != nothing)
-            Error::throwError(DatumP(new Word("TOPLEVEL")), nothing);
+            Error::throwError(DatumP(k.toplevel()), nothing);
     } else if (latestSignal == pauseSignal) {
         if (currentProcedure != nothing)
             pause();
     } else if (latestSignal == systemSignal) {
-        Error::throwError(DatumP(new Word("SYSTEM")), nothing);
+        Error::throwError(DatumP(k.system()), nothing);
     }
     return latestSignal;
 }
@@ -572,11 +559,6 @@ SignalsEnum_t Kernel::interruptCheck()
 DatumP Kernel::runList(DatumP listP, const QString startTag) {
   bool shouldSearchForTag = (startTag != "");
   DatumP retval;
-  QList<DatumP> objectParsedList;
-
-  QList<DatumP> *parsedListP = &objectParsedList;
-  if (currentObject.objectValue() == logoObject)
-    parsedListP = NULL;
 
   interruptCheck();
 
@@ -589,18 +571,18 @@ DatumP Kernel::runList(DatumP listP, const QString startTag) {
 
   bool tagHasBeenFound = !shouldSearchForTag;
 
-  parsedListP = parser->astFromList(listP.listValue(), parsedListP);
-  for (int i = 0; i < parsedListP->size(); ++i) {
+  QList<DatumP> *parsedList = parser->astFromList(listP.listValue());
+  for (int i = 0; i < parsedList->size(); ++i) {
     if (retval != nothing) {
       if (retval.isASTNode()) {
         return retval;
       }
       Error::dontSay(retval);
     }
-    DatumP statement = (*parsedListP)[i];
+    DatumP statement = (*parsedList)[i];
     KernelMethod method = statement.astnodeValue()->kernel;
     if (tagHasBeenFound) {
-        if (isRunningMacroResult && (method == &Kernel::executeMacro) && (i == parsedListP->size()-1)) {
+        if (isRunningMacroResult && (method == &Kernel::executeMacro) && (i == parsedList->size()-1)) {
             return statement;
         }
       retval = (this->*method)(statement);
@@ -643,14 +625,14 @@ DatumP Kernel::excErrorNoGui(DatumP node) {
 
 DatumP Kernel::pause() {
     if (isPausing) {
-        sysPrint("Already Pausing");
+        sysPrint(k.already_pausing());
         return nothing;
     }
   ProcedureScope procScope(this, nothing);
   isPausing = true;
   StreamRedirect streamScope(this, NULL, NULL);
 
-  sysPrint("Pausing...\n");
+  sysPrint(k.pausing());
 
   forever {
     try {
@@ -659,14 +641,14 @@ DatumP Kernel::pause() {
         shouldContinue = getLineAndRunIt(false);
       }
     } catch (Error *e) {
-      if ((e->code == 14) && (e->tag.wordValue()->keyValue() == "PAUSE")) {
+      if ((e->code == 14) && (e->tag.wordValue()->keyValue() == k.pause())) {
         DatumP retval = e->output;
         registerError(nothing);
         isPausing = false;
         return retval;
       }
-      if ((e->code == 14) && ((e->tag.wordValue()->keyValue() == "TOPLEVEL")
-                              || (e->tag.wordValue()->keyValue() == "SYSTEM"))) {
+      if ((e->code == 14) && ((e->tag.wordValue()->keyValue() == k.toplevel())
+                              || (e->tag.wordValue()->keyValue() == k.system()))) {
           isPausing = false;
         throw e;
       }

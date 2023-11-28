@@ -1,11 +1,12 @@
 #include "qlogocontroller.h"
+#include "datum_word.h"
 #include <QMatrix4x4>
 #include <QMessageBox>
 #include <QByteArray>
 #include <QDataStream>
 #include <QApplication>
 #include <unistd.h>
-
+#include "stringconstants.h"
 #ifdef _WIN32
 // For setmode(..., O_BINARY)
 #include <fcntl.h>
@@ -97,14 +98,14 @@ message_t QLogoController::getMessage()
         break;
     }
     case S_SYSTEM:
-        Error::throwError(DatumP(new Word("SYSTEM")), nothing);
+        Error::throwError(DatumP(k.system()), nothing);
         break;
     case S_TOPLEVEL:
         qDebug() <<"TOPLEVEL triggered";
-        Error::throwError(DatumP(new Word("TOPLEVEL")), nothing);
+        Error::throwError(DatumP(k.toplevel()), nothing);
         break;
     case S_PAUSE:
-        Error::throwError(DatumP(new Word("PAUSE")), nothing);
+        Error::throwError(DatumP(k.pause()), nothing);
         break;
     case C_CONSOLE_RAWLINE_READ:
         bufferStream >> rawLine;
@@ -286,7 +287,7 @@ DatumP QLogoController::readRawlineWithPrompt(const QString prompt)
   });
   waitForMessage(C_CONSOLE_RAWLINE_READ);
 
-  return DatumP(new Word(rawLine));
+  return DatumP(rawLine);
 }
 
 
@@ -298,7 +299,7 @@ DatumP QLogoController::readchar()
 
   waitForMessage(C_CONSOLE_CHAR_READ);
 
-  return DatumP(new Word(rawChar));
+  return DatumP(rawChar);
 }
 
 void QLogoController::setTurtlePos(const QMatrix4x4 &newTurtlePos)

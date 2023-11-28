@@ -27,7 +27,7 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum.h"
+#include "datum_datump.h"
 #include <QVector>
 #include <functional>
 
@@ -58,20 +58,22 @@ public:
   DatumP validatedDatumAtIndex(int index, validatorP v);
   DatumP datumAtIndex(int index, bool canRunlist = false);
   DatumP wordAtIndex(int index, bool canRunlist = false);
-  DatumP objectAtIndex(int index, bool canRunlist = false);
   DatumP listAtIndex(int index);
   DatumP validatedListAtIndex(int index, validatorL v);
   DatumP arrayAtIndex(int index);
   double numberAtIndex(int index, bool canRunList = false);
   double validatedNumberAtIndex(int index, validatorD v,
                                 bool canRunList = false);
-  long integerAtIndex(int index);
-  long validatedIntegerAtIndex(int index, validatorI v);
+  int integerAtIndex(int index);
+  int validatedIntegerAtIndex(int index, validatorI v);
   bool boolAtIndex(int index, bool canRunlist = false);
   DatumP reject(int index, bool allowErract = false,
                 bool allowRecovery = false);
   DatumP reject(DatumP value, bool allowErract = false,
                 bool allowRecovery = false);
+  DatumP ret(int aVal);
+  DatumP ret(double aVal);
+  DatumP ret(QString aVal);
   DatumP ret(Datum *aVal);
   DatumP ret(DatumP aVal);
   DatumP ret(bool aVal);

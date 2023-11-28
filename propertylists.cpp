@@ -26,6 +26,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "propertylists.h"
+#include "datum_datump.h"
+#include "datum_list.h"
+#include "datum_word.h"
 
 PropertyLists::PropertyLists() {}
 
@@ -42,7 +45,7 @@ DatumP PropertyLists::getProperty(const QString &plistname,
                                   const QString &propname) {
   if (plists.contains(plistname) && plists[plistname].contains(propname))
     return plists[plistname][propname];
-  return DatumP(new List);
+  return DatumP(List::alloc());
 }
 
 void PropertyLists::removeProperty(const QString &plistname,
@@ -55,13 +58,13 @@ void PropertyLists::removeProperty(const QString &plistname,
 }
 
 DatumP PropertyLists::getPropertyList(const QString &plistname) {
-  List *retval = new List;
+  List *retval = List::alloc();
   if (plists.contains(plistname)) {
     QList<QString> keys = plists[plistname].keys();
     QList<DatumP> values = plists[plistname].values();
     QList<QString>::iterator kIter = keys.begin();
     for (auto &vIter : values) {
-      retval->append(DatumP(new Word(*kIter)));
+      retval->append(DatumP(*kIter));
       retval->append(vIter);
       ++kIter;
     }
@@ -78,10 +81,10 @@ bool PropertyLists::isPropertyList(const QString &plistname) {
 }
 
 DatumP PropertyLists::allPLists(showContents_t showWhat) {
-  List *retval = new List;
+  List *retval = List::alloc();
   for (auto &name : plists.keys()) {
     if (shouldInclude(showWhat, name))
-      retval->append(DatumP(new Word(name)));
+      retval->append(DatumP(name));
   }
   return DatumP(retval);
 }

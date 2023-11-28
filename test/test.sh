@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env zsh
 
 # Run this while in the test directory.
 # ./test.sh [FILENAME]
@@ -16,6 +16,7 @@ argc="$#"
 
 logo_binary=qlogo
 logo_path="../$logo_binary"
+log_file=~/Documents/QLogo_test_runs.csv
 
 failed_tests=()
 
@@ -24,10 +25,10 @@ run_test() {
     if [[ $f == *.lg ]]
     then
 	echo $f
-	$logo_path < $f | diff "${f%.lg}.result" -
+	$logo_path < $f  2>&1 | diff "${f%.lg}.result" -
 	if [ $? -eq 1 ]
 	then
-	    failed_tests+=($f)
+            failed_tests+=($f)
 	fi
     fi
 }
@@ -46,22 +47,29 @@ then
 	run_test $filename
     done
 else
+    log_date=`date "+%Y-%m-%d %H:%M:%S,"`
+    start_time=`date +%s`
+    test_count=0
     for a in *.lg; do
 	run_test $a
+	((++test_count))
     done
+    end_time=`date +%s`
+    trt=$((end_time-start_time))
+    echo ${log_date}${trt}, $test_count >> $log_file
 fi
 
 if (( ${#failed_tests[@]} )); then
     echo
-    echo ============================
-    echo ==== FAILED TESTS:
-    echo ====
+    echo "============================"
+    echo "====" FAILED TESTS:
+    echo "===="
     for f in ${failed_tests[@]}
     do
-	echo ==== $f
-	echo ====
+	echo "====" $f
+	echo "===="
     done
-    echo ============================
+    echo "============================"
     exit 1
 fi
 

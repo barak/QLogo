@@ -26,7 +26,9 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum.h"
+#include "datum_datump.h"
+#include "datum_list.h"
+#include "datum_iterator.h"
 #include "workspace.h"
 #include <QHash>
 
@@ -75,9 +77,6 @@ class Parser : public Workspace {
   DatumP parseTermexp();
   DatumP parseCommand(bool isVararg);
   DatumP parseStopIfExists(DatumP command);
-
-  DatumP nextUsualProc(const QString procname, DatumP ancestorList);
-  DatumP procedureAndASTNodeForCurrentObject(DatumP nodeP, QString cmdString, bool isUsual);
   DatumP astnodeFromCommand(DatumP command, int &minParams, int &defaultParams,
                             int &maxParams);
 
@@ -91,7 +90,7 @@ public:
   DatumP readlistWithPrompt(const QString &prompt, bool shouldRemoveComments,
                             QTextStream *readStream);
   DatumP runparse(DatumP src);
-  QList<DatumP> *astFromList(List *aList, QList<DatumP> *aDest);
+  QList<DatumP> *astFromList(List *aList);
 
   DatumP createProcedure(DatumP cmd, DatumP text, DatumP sourceText);
   void defineProcedure(DatumP cmd, DatumP procnameP, DatumP text,
@@ -126,7 +125,10 @@ public:
 
 class Procedure : public Datum {
 
+  void addToPool();
+
 public:
+  Procedure() {}
   QStringList requiredInputs;
   QStringList optionalInputs;
   QList<DatumP> optionalDefaults;
@@ -141,10 +143,18 @@ public:
   DatumP instructionList;
   DatumType isa() { return Datum::procedureType; }
 
-  Procedure() {
-    instructionList = DatumP(new List);
+  void init() {
+    instructionList = nothing;
     countOfMaxParams = -1;
     countOfMinParams = 0;
+    requiredInputs.clear();
+    optionalInputs.clear();
+    optionalDefaults.clear();
+    restInput = "";
+    defaultNumber = 0;
+    tagToLine.clear();
+    isMacro = false;
+    sourceText = nothing;
   }
 };
 

@@ -25,8 +25,15 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum.h"
+#include "datum_word.h"
+#include "datum_array.h"
+#include "datum_datump.h"
+#include "datum_list.h"
+#include "datum_iterator.h"
 #include <qdebug.h>
+#include "stringconstants.h"
+
+static DatumPool<Array> pool(5);
 
 QList<void *> aryVisited;
 QList<void *> otherAryVisited;
@@ -35,27 +42,49 @@ Array::Array(int aOrigin, int aSize) {
   origin = aOrigin;
   array.reserve(aSize);
   for (int i = 0; i < aSize; ++i) {
-    array.append(DatumP(new List));
+    array.append(DatumP(List::alloc()));
   }
 }
 
-Array::Array(int aOrigin, List *source) {
-  origin = aOrigin;
-  array.reserve(source->size());
+
+void Array::clear()
+{
+  origin = 1;
+  array.clear();
+}
+
+Array * Array::alloc(int aOrigin, int aSize)
+{
+  Array * retval = (Array *) pool.alloc();
+  retval->array.reserve(aSize);
+  retval->origin = aOrigin;
+  return retval;
+}
+
+Array * Array::alloc(int aOrigin, List *source)
+{
+  Array * retval = alloc(aOrigin, source->size());
+
   auto iter = source->newIterator();
 
   while (iter.elementExists()) {
-      array.push_back(iter.element());
+    retval->append(iter.element());
   }
+  return retval;
 }
 
 Array::~Array() {}
 
+void Array::addToPool()
+{
+  clear();
+  pool.dealloc(this);
+}
+
 Datum::DatumType Array::isa() { return Datum::arrayType; }
 
 QString Array::name() {
-  static const QString retval("Array");
-  return retval;
+  return k.array();
 }
 
 QString Array::printValue(bool fullPrintp, int printDepthLimit,
@@ -71,7 +100,7 @@ QString Array::printValue(bool fullPrintp, int printDepthLimit,
   int printWidth = printWidthLimit - 1;
   retval = iter->showValue(fullPrintp, printDepthLimit - 1, printWidthLimit);
   while (++iter != array.end()) {
-    retval.append(QString(" "));
+    retval.append(' ');
     if (printWidth == 0) {
       retval.append("...");
       break;
@@ -89,7 +118,7 @@ QString Array::showValue(bool fullPrintp, int printDepthLimit,
     aryVisited.push_back(this);
     QString retval = "{";
     retval.append(printValue(fullPrintp, printDepthLimit, printWidthLimit));
-    retval.append("}");
+    retval.append('}');
     aryVisited.removeOne(this);
     return retval;
   }
@@ -166,7 +195,7 @@ DatumP Array::datumAtIndex(int anIndex) {
   return array[index];
 }
 
-DatumP Array::first() { return DatumP(new Word(origin)); }
+DatumP Array::first() { return DatumP(origin); }
 
 DatumP Array::last() {
   Q_ASSERT(array.size() > 0);
@@ -186,3 +215,4 @@ DatumP Array::butlast() {
 }
 
 ArrayIterator Array::newIterator() { return ArrayIterator(&array); }
+

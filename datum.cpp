@@ -25,39 +25,54 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum.h"
+#include "datum_datump.h"
+#include "datum_list.h"
+#include "stringconstants.h"
 #include <qdebug.h>
+#include <unistd.h>
 
+// TODO: is this necessary?
 int countOfNodes = 0;
 int maxCountOfNodes = 0;
 
-DatumP nodes() {
+DatumP nodes()
+{
   int a = countOfNodes;
   int b = maxCountOfNodes;
 
   maxCountOfNodes = countOfNodes;
 
-  List *retval = new List;
-  retval->append(DatumP(new Word(a)));
-  retval->append(DatumP(new Word(b)));
+  List *retval = List::alloc();
+  retval->append(DatumP(a));
+  retval->append(DatumP(b));
   return DatumP(retval);
 }
 
 
-Datum::Datum() {
+Datum::Datum()
+{
   retainCount = 0;
   ++countOfNodes;
   if (countOfNodes > maxCountOfNodes)
     maxCountOfNodes = countOfNodes;
 }
 
-Datum::~Datum() { --countOfNodes; }
+Datum::~Datum()
+{
+  --countOfNodes;
+}
+
+
+void Datum::addToPool()
+{
+  // Base class does nothing. Subclasses should add themselves to their pools.
+  Q_ASSERT(false);
+}
 
 QString Datum::printValue(bool, int, int) { return name(); }
 
 QString Datum::name(void) {
-  static QString retval("nothing");
-  return retval;
+  return k.nothing();
 }
 
 QString Datum::showValue(bool, int, int) { return name(); }
@@ -128,7 +143,6 @@ int Datum::size() {
   Q_ASSERT(false);
   return 0;
 }
-
 
 
 // Values to represent no data (NULL)
