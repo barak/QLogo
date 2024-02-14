@@ -1,27 +1,21 @@
 # This is README for QLogo.
 
+![QLogo Icon](qlogo_logo.png)
+
+
 ## Downloading
 
-At this time the most recent commit is, I believe, the most stable.
-
 I am not providing compiled versions of QLogo at this time. Windows
-and Macos systems require me to sign the binaries. (This is a
-good thing.) I still have yet to learn how to do that.
-
-Please note that there are now TWO executables: logo and QLogo. The
-*logo* executable works as a standalone command-line program. The
-*QLogo* executable is a sort of GUI terminal that also provides a
-turtle.
+and Macos systems require me to sign the binaries. This is a
+good thing. I still have yet to learn how to do that.
 
 ***
-
-![QLogo Icon](qlogo_icon384rgba.png)
 
 QLogo is an interpreter for the Logo language written in C++ using
 Qt and OpenGL. It mimics (as much as I find reasonable) the UCBLogo
 interpreter developed by Brian Harvey at U.C. Berkeley.
 
-Copyright (C) 2017-2023 Jason Sikes
+Copyright (C) 2017-2024 Jason Sikes
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -49,46 +43,76 @@ You can find the UCBLogo Manual here:
 http://people.eecs.berkeley.edu/~bh/usermanual
 
 The differences between QLogo and UCBLogo are described in the
-**nuances** section below.
+**nuances** section below. There aren't many.
 
 ***
 
 
 ## Compiling
 
-QLogo requires Qt6 and cmake.
+Building QLogo requires Qt6 and CMake.
 
-### To build:
+### To build in MacOS and Windows:
+
+Simply open the CMakeLists.txt file in QtCreator and build within there. 
+
+### To build in Linux:
+
+If you have qtcreator, you can use qtcreator in Linux in the same mannor as
+in Windows and MacOS described above.
+
+Otherwise, you can follow the standard CMake build procedure. First, create a
+build directory somewhere outside of the QLogo source directory.
+
+*In my case, since I keep my projects in a "Projects" directory under my home,
+my QLogo directory can be found at "\~/Projects/QLogo". Thus, one place to create
+my "build" would be adjacent to my QLogo directory, "\~/Projects/build".*
+
+Then have CMake create the build structure.
+
 
 ```
-$ cmake CMakeLists.txt
+
+$ cd ~/Projects
+
+$ mkdir build
+
+$ cmake -S QLogo -B build
+
+```
+
+Then enter into your build directory and issue ```make```, and if all goes well,
+you can run ```make install```
+
+```
+
+$ cd build
 
 $ make
+
+$ sudo make install
 ```
 
 This will give you two executables:
 
-1. "qlogo": this is the Logo interpreter that can be run from the command line.
+1. "qlogo": this is the Logo interpreter that can be run from a script or command line.
 
-2. "QLogo-GUI": this is the graphical user interface that runs qlogo and gives
-you the turtle.
-
-There is no "make install" step yet.
+2. "QLogo-GUI": this is the graphical user interface that will run qlogo and provides
+the turtle.
 
 ***
 
-
-## There are a few nuances:
+## Here are the nuances (they're mostly insignificant, I think):
 
 
 * Colors can be specified in one of three ways:
 
-   * as a palette index (0 to 100), same as UCBLogo
+   1. as a palette index (0 to 100), same as UCBLogo
 
-   * as a list of 3 percentages, one for each of red, green, blue `[0 0 0]` is
-   black, `[100 100 100]` is white
+   2. as a list of 3 percentages, one for each of red, green, blue `[0 0 0]` is
+   black, `[100 100 100]` is white, also same as UCBLogo
 
-   * as a named color from the X Color Database, e.g. `white` or `lemonchiffon`.
+   3. as a named color from the X Color Database, e.g. `white` or `lemonchiffon`.
    The X Color database can be found here:
    https://en.wikipedia.org/wiki/X11_color_names
 
@@ -124,10 +148,6 @@ There is no "make install" step yet.
   PNG, PPM, XBM, and XPM
 
 
-* `HELP` is not functional. I am moving the help text to the file system so
-  that it can be loaded as needed.
-
-
 * There is no facility yet for translation/internationalization. Yet.
 
 
@@ -145,7 +165,7 @@ can move the window to a different position.
 
 `FILL`:
 
-Two reasons: One of the user interface principles is that
+Two reasons: One of the user interface principles for QLogo is that
 the canvas should be device resolution-independent. That
 means when the QLogo window is resized or the separator
 between the text and the graphics is moved the graphics
@@ -153,7 +173,8 @@ will be redrawn with the new dimensions. The Flood Fill
 algorithm depends on specific pixels which means that the
 display can change dramatically depending on the size of
 the canvas. The other reason is that the Flood Fill
-algorithm can slow down window resizing. Use FILLED instead.
+algorithm can slow down window resizing. FILLED is still
+available.
 
 `LOADPICT`:
 
@@ -182,7 +203,7 @@ The QLogo library is stored internally.
 
 `SETHELPLOC`:
 
-Not implemented yet.
+Not implemented. QLogo uses a SQLite database to store help text.
 
 `SETTEMPLOC`:
 
