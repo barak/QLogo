@@ -2,6 +2,7 @@
 # but on MacOS I want to put them into the QLogo-GUI bundle.
 set(RESOURCE_FILES
   ../../share/qlogo_help.db
+  ../../share/qlogo_lib.db
 )
 set(GUI_SOURCES
   canvas.cpp
@@ -10,10 +11,10 @@ set(GUI_SOURCES
   mainwindow.cpp
   qlogo_main.cpp
 
-  ../include/canvas.h
-  ../include/console.h
-  ../include/editorwindow.h
-  ../include/mainwindow.h
+  ../include/gui/canvas.h
+  ../include/gui/console.h
+  ../include/gui/editorwindow.h
+  ../include/gui/mainwindow.h
   ../include/sharedconstants.h
 
   editorwindow.ui
@@ -54,7 +55,7 @@ target_include_directories("${QLOGO_GUI}" PUBLIC
 
 target_link_libraries("${QLOGO_GUI}" PRIVATE
     Qt${QT_VERSION_MAJOR}::Widgets
-    Qt${QT_VERSION_MAJOR}::OpenGLWidgets
+    Qt${QT_VERSION_MAJOR}::Svg
     Qt${QT_VERSION_MAJOR}::Sql
 )
 

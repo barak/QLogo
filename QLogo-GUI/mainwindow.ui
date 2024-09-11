@@ -105,13 +105,13 @@
  <customwidgets>
   <customwidget>
    <class>Canvas</class>
-   <extends>QOpenGLWidget</extends>
-   <header>canvas.h</header>
+   <extends>QWidget</extends>
+   <header>gui/canvas.h</header>
   </customwidget>
   <customwidget>
    <class>Console</class>
    <extends>QTextEdit</extends>
-   <header>console.h</header>
+   <header>gui/console.h</header>
   </customwidget>
  </customwidgets>
  <resources/>

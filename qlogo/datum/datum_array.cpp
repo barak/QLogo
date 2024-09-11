@@ -1,20 +1,10 @@
-//===-- qlogo/datum_array.cpp - Array class implementation -------*-
-// C++ -*-===//
+//===-- qlogo/datum_array.cpp - Array class implementation --*- C++ -*-===//
 //
-// This file is part of QLogo.
+// Copyright 2017-2024 Jason Sikes
 //
-// QLogo is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// QLogo is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with QLogo.  If not, see <http://www.gnu.org/licenses/>.
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted under the conditions specified in the
+// license found in the LICENSE file in the project root.
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -25,193 +15,73 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum_array.h"
-#include "datum_datump.h"
-#include "datum_list.h"
-#include "datum_iterator.h"
-#include <qdebug.h>
-#include "stringconstants.h"
+#include "datum.h"
 
-static DatumPool<Array> pool(5);
-
-QList<void *> aryVisited;
-QList<void *> otherAryVisited;
-
-Array::Array(int aOrigin, int aSize) {
-  origin = aOrigin;
-  array.reserve(aSize);
-  for (int i = 0; i < aSize; ++i) {
-    array.append(DatumPtr(List::alloc()));
-  }
-}
-
-
-void Array::clear()
+Array::Array(int aOrigin, int aSize)
 {
-  origin = 1;
-  array.clear();
+    origin = aOrigin;
+    array.reserve(aSize);
 }
 
-Array * Array::alloc(int aOrigin, int aSize)
+Array::Array(int aOrigin, List *source)
 {
-  Array * retval = (Array *) pool.alloc();
-  retval->array.reserve(aSize);
-  retval->origin = aOrigin;
-  return retval;
+    auto iter = source->newIterator();
+    origin = aOrigin;
+    while (iter.elementExists())
+    {
+        array.append(iter.element());
+    }
 }
 
-Array * Array::alloc(int aOrigin, List *source)
+Array::~Array()
 {
-  Array * retval = alloc(aOrigin, source->size());
-
-  auto iter = source->newIterator();
-
-  while (iter.elementExists()) {
-    retval->append(iter.element());
-  }
-  return retval;
 }
 
-Array::~Array() {}
-
-void Array::addToPool()
+Datum::DatumType Array::isa()
 {
-  clear();
-  pool.dealloc(this);
+    return Datum::arrayType;
 }
 
-Datum::DatumType Array::isa() { return Datum::arrayType; }
+QString Array::printValue(bool fullPrintp, int printDepthLimit, int printWidthLimit)
+{
+    // This is used to prevent infinite recursion when printing arrays.
+    static QList<void *> aryVisited;
 
-QString Array::name() {
-  return k.array();
-}
-
-QString Array::printValue(bool fullPrintp, int printDepthLimit,
-                          int printWidthLimit) {
-  QString retval = "";
-  auto iter = array.begin();
-  if (iter == array.end()) {
-    return retval;
-  }
-  if ((printDepthLimit == 0) || (printWidthLimit == 0)) {
+    // If this array has already been printed, don't print it again.
+    if (!aryVisited.contains(this))
+    {
+        aryVisited.push_back(this);
+        auto iter = array.begin();
+        if (iter == array.end())
+        {
+            return "{}";
+        }
+        if ((printDepthLimit == 0) || (printWidthLimit == 0))
+        {
+            return "{...}";
+        }
+        int printWidth = printWidthLimit;
+        QString retval = "{";
+        do
+        {
+            if (iter != array.begin())
+                retval.append(' ');
+            if (printWidth == 0)
+            {
+                retval.append("...");
+                break;
+            }
+            retval.append(iter->showValue(fullPrintp, printDepthLimit - 1, printWidthLimit));
+            --printWidth;
+        } while (++iter != array.end());
+        retval += "}";
+        aryVisited.removeOne(this);
+        return retval;
+    }
     return "...";
-  }
-  int printWidth = printWidthLimit - 1;
-  retval = iter->showValue(fullPrintp, printDepthLimit - 1, printWidthLimit);
-  while (++iter != array.end()) {
-    retval.append(' ');
-    if (printWidth == 0) {
-      retval.append("...");
-      break;
-    }
-    retval.append(
-        iter->showValue(fullPrintp, printDepthLimit - 1, printWidthLimit));
-    --printWidth;
-  }
-  return retval;
 }
 
-QString Array::showValue(bool fullPrintp, int printDepthLimit,
-                         int printWidthLimit) {
-  if (!aryVisited.contains(this)) {
-    aryVisited.push_back(this);
-    QString retval = "{";
-    retval.append(printValue(fullPrintp, printDepthLimit, printWidthLimit));
-    retval.append('}');
-    aryVisited.removeOne(this);
-    return retval;
-  }
-  return "...";
+QString Array::showValue(bool fullPrintp, int printDepthLimit, int printWidthLimit)
+{
+    return printValue(fullPrintp, printDepthLimit, printWidthLimit);
 }
-
-bool Array::isEqual(DatumPtr other, bool) {
-  Array *o = other.arrayValue();
-  return this == o;
-}
-
-int Array::size() { return array.size(); }
-
-void Array::append(DatumPtr value) { array.append(value); }
-
-bool Array::isIndexInRange(int anIndex) {
-  int index = anIndex - origin;
-  return ((index >= 0) && (index < array.size()));
-}
-
-void Array::setItem(int anIndex, DatumPtr aValue) {
-  int index = anIndex - origin;
-  array[index] = aValue;
-}
-
-void Array::setButfirstItem(DatumPtr aValue) {
-  Q_ASSERT(array.size() > 0);
-  auto estart = array.begin();
-  ++estart;
-  array.erase(estart, array.end());
-  array.reserve(aValue.arrayValue()->size() + 1);
-  array.append(aValue.arrayValue()->array);
-}
-
-void Array::setFirstItem(DatumPtr aValue) { array[0] = aValue; }
-
-bool Array::containsDatum(DatumPtr aDatum, bool ignoreCase) {
-  for (int i = 0; i < array.size(); ++i) {
-    DatumPtr e = array[i];
-    if (e == aDatum)
-      return true;
-    if (e.datumValue()->containsDatum(aDatum, ignoreCase))
-      return true;
-  }
-  return false;
-}
-
-bool Array::isMember(DatumPtr aDatum, bool ignoreCase) {
-  for (int i = 0; i < array.size(); ++i) {
-    if (array[i].isEqual(aDatum, ignoreCase))
-      return true;
-  }
-  return false;
-}
-
-DatumPtr Array::fromMember(DatumPtr aDatum, bool ignoreCase) {
-  for (int i = 0; i < array.size(); ++i) {
-    if (array[i].isEqual(aDatum, ignoreCase)) {
-      Array *retval = new Array(origin, 0);
-      retval->array.reserve(array.size() - i);
-      while (i < array.size()) {
-        retval->append(array[i]);
-        ++i;
-      }
-      return DatumPtr(retval);
-    }
-  }
-  return DatumPtr(new Array(origin, 0));
-}
-
-DatumPtr Array::datumAtIndex(int anIndex) {
-  int index = anIndex - origin;
-  Q_ASSERT((index >= 0) && (index < array.size()));
-  return array[index];
-}
-
-DatumPtr Array::first() { return DatumPtr(origin); }
-
-DatumPtr Array::last() {
-  Q_ASSERT(array.size() > 0);
-  return array[array.size() - 1];
-}
-
-DatumPtr Array::butfirst() {
-  Array *retval = new Array(origin, 0);
-  retval->array = array.mid(1, array.size() - 1);
-  return DatumPtr(retval);
-}
-
-DatumPtr Array::butlast() {
-  Array *retval = new Array(origin, 0);
-  retval->array = array.mid(0, array.size() - 1);
-  return DatumPtr(retval);
-}
-
-ArrayIterator Array::newIterator() { return ArrayIterator(&array); }
-

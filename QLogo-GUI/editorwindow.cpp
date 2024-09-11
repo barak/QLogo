@@ -1,21 +1,11 @@
 
-//===-- qlogo/editorwindow.cpp - EditorWindow class implementation -------*- C++
-//-*-===//
+//===-- qlogo/editorwindow.cpp - EditorWindow class implementation ---*- C++ -*-===//
 //
-// This file is part of QLogo.
+// Copyright 2017-2024 Jason Sikes
 //
-// QLogo is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
-// (at your option) any later version.
-//
-// QLogo is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with QLogo.  If not, see <http://www.gnu.org/licenses/>.
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted under the conditions specified in the
+// license found in the LICENSE file in the project root.
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -25,75 +15,92 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "editorwindow.h"
+#include "gui/editorwindow.h"
 #include "QDebug"
 #include "ui_editorwindow.h"
 #include <QTimer>
 
+/// @brief The key sequence for reverting changes.
 const QKeySequence::StandardKey revertChangesKey = QKeySequence::Close;
+
+/// @brief The key sequence for saving changes.
 const QKeySequence::StandardKey saveChangesKey = QKeySequence::Save;
 
-EditorWindow::EditorWindow(QWidget *parent)
-    : QMainWindow(parent), ui(new Ui::EditorWindow) {
-  ui->setupUi(this);
+EditorWindow::EditorWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::EditorWindow)
+{
+    ui->setupUi(this);
 
-  Qt::WindowFlags flags = windowFlags();
-  Qt::WindowFlags closeFlag = Qt::WindowCloseButtonHint;
-  flags = flags & (~closeFlag);
-  setWindowFlags(flags);
+    Qt::WindowFlags flags = windowFlags();
+    Qt::WindowFlags closeFlag = Qt::WindowCloseButtonHint;
+    flags = flags & (~closeFlag);
+    setWindowFlags(flags);
 
-  connect(ui->acceptButton, SIGNAL(clicked(bool)), this, SLOT(acceptChanges()));
-  connect(ui->revertButton, SIGNAL(clicked(bool)), this, SLOT(revertChanges()));
-  ui->plainTextEdit->installEventFilter(this);
+    connect(ui->acceptButton, SIGNAL(clicked(bool)), this, SLOT(acceptChanges()));
+    connect(ui->revertButton, SIGNAL(clicked(bool)), this, SLOT(revertChanges()));
+    ui->plainTextEdit->installEventFilter(this);
 }
 
-EditorWindow::~EditorWindow() { delete ui; }
-
-void EditorWindow::setContents(const QString startingText) {
-  ui->plainTextEdit->setPlainText(startingText);
+EditorWindow::~EditorWindow()
+{
+    delete ui;
 }
 
-void EditorWindow::setTextFormat(const QTextCharFormat &qtcf) {
-  ui->plainTextEdit->setFont(qtcf.font());
-  QPalette palette = ui->plainTextEdit->palette();
-  palette.setBrush(QPalette::Text, qtcf.foreground());
-  palette.setBrush(QPalette::Base, qtcf.background());
-  ui->plainTextEdit->setPalette(palette);
+void EditorWindow::setContents(const QString startingText)
+{
+    ui->plainTextEdit->setPlainText(startingText);
 }
 
-void EditorWindow::show() {
-  QMainWindow::show();
-
-  QTimer::singleShot(0, ui->plainTextEdit, SLOT(setFocus()));
+void EditorWindow::setTextFormat(const QTextCharFormat &qtcf)
+{
+    ui->plainTextEdit->setFont(qtcf.font());
+    QPalette palette = ui->plainTextEdit->palette();
+    palette.setBrush(QPalette::Text, qtcf.foreground());
+    palette.setBrush(QPalette::Base, qtcf.background());
+    ui->plainTextEdit->setPalette(palette);
 }
 
-void EditorWindow::acceptChanges() {
-  QString text = ui->plainTextEdit->toPlainText();
-  emit editingHasEndedSignal(text);
-  close();
+void EditorWindow::show()
+{
+    QMainWindow::show();
+
+    QTimer::singleShot(0, ui->plainTextEdit, SLOT(setFocus()));
 }
 
-void EditorWindow::revertChanges() {
-  emit editingHasEndedSignal("");
-  close();
+void EditorWindow::acceptChanges()
+{
+    QString text = ui->plainTextEdit->toPlainText();
+    emit editingHasEndedSignal(text);
+    close();
 }
 
-bool EditorWindow::eventFilter(QObject *watched, QEvent *event) {
-  if (event->type() == QEvent::KeyPress) {
-    QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+void EditorWindow::revertChanges()
+{
+    emit editingHasEndedSignal("");
+    close();
+}
 
-    if (keyEvent->matches(saveChangesKey)) {
-      acceptChanges();
-      return true;
+bool EditorWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::KeyPress)
+    {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+
+        if (keyEvent->matches(saveChangesKey))
+        {
+            acceptChanges();
+            return true;
+        }
+        if (keyEvent->matches(revertChangesKey))
+        {
+            revertChanges();
+            return true;
+        }
+
+        return false;
     }
-    if (keyEvent->matches(revertChangesKey)) {
-      revertChanges();
-      return true;
+    else
+    {
+        // standard event processing
+        return QObject::eventFilter(watched, event);
     }
-
-    return false;
-  } else {
-    // standard event processing
-    return QObject::eventFilter(watched, event);
-  }
 }

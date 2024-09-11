@@ -12,46 +12,43 @@ set(QLOGO_SOURCES
   datum/datum_word.cpp
   datum/error.cpp
   executor/kernel.cpp
-  executor/kernel_arithmetic.cpp
-  executor/kernel_communication.cpp
-  executor/kernel_controlstructures.cpp
-  executor/kernel_datastructureprimitives.cpp
-  executor/kernel_graphics.cpp
-  executor/kernel_workspacemanagement.cpp
+  executor/arithmetic.cpp
+  executor/communication.cpp
+  executor/controlstructures.cpp
+  executor/datastructureprimitives.cpp
+  executor/graphics.cpp
+  executor/workspacemanagement.cpp
   logo_main.cpp
-  misc/help.cpp
   misc/library.cpp
   misc/procedurehelper.cpp
-  misc/stringconstants.cpp
   misc/turtle.cpp
-  workspace/parser.cpp
+  parser/parser.cpp
+  parser/runparser.cpp
+  workspace/callframe.cpp
+  workspace/procedures.cpp
   workspace/propertylists.cpp
-  workspace/vars.cpp
   workspace/workspace.cpp
-  
+
   ../include/sharedconstants.h
-  ../include/inputqueue.h
-  ../include/logocontroller.h
-  ../include/logocontrollergui.h
-  ../include/textstream.h
+  ../include/controller/inputqueue.h
+  ../include/controller/logocontroller.h
+  ../include/controller/logocontrollergui.h
+  ../include/controller/textstream.h
   ../include/datum.h
-  ../include/datum_array.h
-  ../include/datum_astnode.h
-  ../include/datum_datump.h
-  ../include/datum_iterator.h
-  ../include/datum_list.h
-  ../include/datum_word.h
+  ../include/astnode.h
   ../include/error.h
-  ../include/help.h
   ../include/kernel.h
+  ../include/primitives.h
   ../include/library.h
   ../include/procedurehelper.h
-  ../include/stringconstants.h
   ../include/turtle.h
   ../include/parser.h
-  ../include/propertylists.h
-  ../include/vars.h
-  ../include/workspace.h
+  ../include/runparser.h
+  ../include/workspace/callframe.h
+  ../include/workspace/primitivetable.h
+  ../include/workspace/procedures.h
+  ../include/workspace/propertylists.h
+  ../include/workspace/workspace.h
 )
 
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Sql)

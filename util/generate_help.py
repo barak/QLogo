@@ -4,16 +4,27 @@
 # by Jason Sikes
 
 # To use:
-# generate_help.py <source_dir> <dest_db>
+# generate_help.py <cpp_source_dir> <library_helpfile.json> <dest_db>
 #
-# Or, more specifically:
-# $ cd Projects/QLogo
-# $ util/generate_help.py qlogo/executor share/qlogo_help.db
+# Where:
+# 
+# <cpp_source_dir> is the directory containing the C++ source code
+# for the QLogo primitives.
+# 
+# <library_helpfile.json> is a JSON file that maps the library names to the
+# help text for each library procedure.
+# 
+# <dest_db> is the path to the SQLite database to be created.
+#
+# Example:
+# $ cd ~/Projects/QLogo
+# $ util/generate_help.py qlogo/executor util/logolib_help.json share/qlogo_help.db
 
-import os, errno, sqlite3, sys, re
+import os, errno, sqlite3, sys, re, json
 
 source_prefix = sys.argv[1]
-dest_path = sys.argv[2]
+json_file_path = sys.argv[2]
+dest_path = sys.argv[3]
 
 SOURCES = [f for f in os.listdir(source_prefix) if re.match(r'.*\.cpp', f)]
 
@@ -23,7 +34,6 @@ SOURCES = [f for f in os.listdir(source_prefix) if re.match(r'.*\.cpp', f)]
 # "/***DOC FORWARD FD" where the command has two names:
 # "FORWARD" and "FD".
 # Returns list of words from header (or empty string if eof).
-
 def find_next_header(file):
     while True:
         line = file.readline()
@@ -37,7 +47,6 @@ def find_next_header(file):
 # Reads and collects text until end of documentation marker:
 # "COD***/"
 # Returns the entire help text as a string.
-
 def read_text(file):
     retval = ''
     while True:
@@ -74,11 +83,14 @@ conn = sqlite3.connect(dest_path)
 
 # Some commands have more than one name and share a help text.
 # We create at least one alias for every command name.
-# An alias may be the same as the command, e.g.:
-# FORWARD and FD both point to FORWARD. FORWARD then is the
-# key to the help text.
-# MAKE is the only alias for MAKE. MAKE is the key to the
-# help text.
+# An alias may be the same as the command. For example:
+# The FORWARD command has an alias, FD. We include both
+# FORWARD and FD in the ALIASES table which points to
+# FORWARD, which is the key to the help text.
+
+# In cases where a command has no aliases, the alias table
+# entry points to the command itself.
+
 conn.execute('''CREATE TABLE ALIASES
          (ALIAS TEXT PRIMARY KEY     NOT NULL,
          COMMAND          TEXT    NOT NULL);''')
@@ -86,7 +98,8 @@ conn.execute('''CREATE TABLE HELPTEXT
          (COMMAND TEXT PRIMARY KEY     NOT NULL,
          DESCRIPTION          TEXT)''')
 
-
+# Read the C++ source code for the QLogo primitives and insert the help text
+# into the SQLite database.
 for source in SOURCES:
     path = "%s/%s" % (source_prefix, source)
     print("Reading '%s'." % (path))
@@ -102,5 +115,28 @@ for source in SOURCES:
         entries += 1
 
     print("Found %s entries" % (entries))
+
+
+# The Logo standard library is not a part of the QLogo C++ source code.
+# So the library and its help text are in separate JSON files.
+# Read the JSON file and insert the library help text into the database.
+
+print("Reading '%s'." % (json_file_path))
+entries = 0
+with open(json_file_path, 'r') as json_file:
+    help_data = json.load(json_file)
+
+for command, help_text_lines in help_data.items():
+    help_text = '\n'.join(help_text_lines) + '\n'
+    command_list = [command]
+    # A special case: one of the commands has an alternate name. For that command,
+    # include the alternate name in the ALIASES table.
+    if command == 'FILEP':
+        command_list.append('FILE?')
+    insert(conn, command_list, help_text)
+    entries += 1
+
+print("Found %s entries" % (entries))
+
 print("Finished!")
 conn.close()

@@ -1,79 +1,75 @@
 
-//===-- qlogo/datum_astNode.cpp - AstNode class implementation -------*-
-// C++ -*-===//
+//===-- qlogo/datum_astNode.cpp - AstNode class implementation --*- C++ -*-===//
 //
-// This file is part of QLogo.
+// Copyright 2017-2024 Jason Sikes
 //
-// QLogo is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// QLogo is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with QLogo.  If not, see <http://www.gnu.org/licenses/>.
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted under the conditions specified in the
+// license found in the LICENSE file in the project root.
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// This file contains the implementation of the AstNode class, which is the basic
-/// unit of the Abstract Syntax Tree.
+/// This file contains the implementation of the AstNode class, which is a node
+/// in the Abstract Syntax Tree.
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum_astnode.h"
+#include "astnode.h"
 #include <qdebug.h>
 
+void ASTNode::addChild(DatumPtr aChild)
+{
+    children.push_back(aChild);
+}
 
-static DatumPool<ASTNode> pool(40);
+int ASTNode::countOfChildren()
+{
+    return (int)children.size();
+}
 
-void ASTNode::addChild(DatumPtr aChild) { children.push_back(aChild); }
+DatumPtr ASTNode::childAtIndex(unsigned index)
+{
+    return children.at(index);
+}
 
-int ASTNode::countOfChildren() { return (int)children.size(); }
+ASTNode::ASTNode(DatumPtr aNodeName)
+{
+    children.clear();
+    nodeName = aNodeName;
+    kernel = NULL;
+}
 
-DatumPtr ASTNode::childAtIndex(unsigned index) { return children.at(index); }
+ASTNode::ASTNode(QString aNodeName)
+{
+    children.clear();
+    nodeName = DatumPtr(aNodeName);
+    kernel = NULL;
+}
 
+ASTNode::~ASTNode()
+{
+}
 
-ASTNode * ASTNode::alloc(DatumPtr aNodeName) {
-    ASTNode *retval = (ASTNode *)pool.alloc();
-    retval->children.clear();
-    retval->nodeName = aNodeName;
-    retval->kernel = NULL;
+Datum::DatumType ASTNode::isa()
+{
+    return astnodeType;
+}
+
+// For debugging. Parameters are ignored.
+QString ASTNode::printValue(bool, int, int)
+{
+    QString retval = QString("( %1").arg(nodeName.showValue());
+    for (auto &iter : children)
+    {
+        retval.append(QString(" %2").arg(iter.showValue()));
+    }
+    retval.append(" )");
     return retval;
 }
 
-
-ASTNode * ASTNode::alloc(QString aNodeName) {
-    return alloc(DatumPtr(aNodeName));
-}
-
-ASTNode::~ASTNode() {
-}
-
-void ASTNode::addToPool()
+// For debugging. Parameters are ignored.
+QString ASTNode::showValue(bool, int, int)
 {
-    nodeName = nothing;
-    children.clear();
-    pool.dealloc(this);
+    return printValue();
 }
-
-Datum::DatumType ASTNode::isa() { return astnodeType; }
-
-
-QString ASTNode::printValue(bool, int, int) {
-  QString retval = QString("( %1").arg(nodeName.showValue());
-  for (auto &iter : children) {
-    retval.append(QString(" %2").arg(iter.showValue()));
-  }
-  retval.append(" )");
-  return retval;
-}
-
-QString ASTNode::showValue(bool, int, int) { return printValue(); }
-
-
-

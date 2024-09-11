@@ -1,21 +1,11 @@
 
-//===-- qlogo/datum_DatumPtr.cpp - DatumPtr class implementation -------*-
-// C++ -*-===//
+//===-- qlogo/datum_DatumPtr.cpp - DatumPtr class implementation --*- C++ -*-===//
 //
-// This file is part of QLogo.
+// Copyright 2017-2024 Jason Sikes
 //
-// QLogo is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// QLogo is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with QLogo.  If not, see <http://www.gnu.org/licenses/>.
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted under the conditions specified in the
+// license found in the LICENSE file in the project root.
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -26,173 +16,205 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum_datump.h"
-#include "datum_word.h"
-#include "datum_list.h"
-#include "stringconstants.h"
+#include "datum.h"
+#include <QObject>
 #include <qdebug.h>
 
-DatumPtr::DatumPtr() { d = &notADatum; }
-
-DatumPtr::DatumPtr(Datum *other) {
-  d = other;
-  if (d) {
-    d->retain();
-  }
+DatumPtr::DatumPtr() : d(&notADatum)
+{
 }
 
-DatumPtr::DatumPtr(const DatumPtr &other) noexcept {
-  d = other.d;
-  if (d) {
-    d->retain();
-  }
+DatumPtr::DatumPtr(Datum *other)
+{
+    d = other;
+    if (d)
+    {
+        ++(d->retainCount);
+    }
 }
 
-DatumPtr::DatumPtr(bool b) {
-  d = Word::alloc(b ? k.ktrue() : k.kfalse());
-  d -> retain();
+DatumPtr::DatumPtr(const DatumPtr &other) noexcept
+{
+    d = other.d;
+    if (d)
+    {
+        ++(d->retainCount);
+    }
 }
 
+DatumPtr::DatumPtr(bool b)
+{
+    d = new Word(b ? QObject::tr("true") : QObject::tr("false"));
+    ++(d->retainCount);
+}
 
 DatumPtr::DatumPtr(double n)
 {
-  d = Word::alloc(n);
-  d->retain();
+    d = new Word(n);
+    ++(d->retainCount);
 }
-
 
 DatumPtr::DatumPtr(int n)
 {
-  d = Word::alloc((double)n);
-  d->retain();
+    d = new Word((double)n);
+    ++(d->retainCount);
 }
 
-
-DatumPtr::DatumPtr(const QString n, bool isVBarred)
+DatumPtr::DatumPtr(QString n, bool isVBarred)
 {
-  d = Word::alloc(n, isVBarred);
-  d->retain();
+    d = new Word(n, isVBarred);
+    ++(d->retainCount);
 }
 
-DatumPtr::DatumPtr(const char* n)
+DatumPtr::DatumPtr(const char *n)
 {
-  d = Word::alloc(QString(n));
-  d->retain();
+    d = new Word(QString(n));
+    ++(d->retainCount);
 }
 
-void DatumPtr::destroy() {
-  if (d != &notADatum) {
-    d->release();
-  }
-}
-
-DatumPtr::~DatumPtr() { destroy(); }
-
-DatumPtr &DatumPtr::operator=(const DatumPtr &other) noexcept {
-  if (&other != this) {
-    destroy();
-    d = other.d;
-    if (d) {
-      d->retain();
+void DatumPtr::destroy()
+{
+    if (d != &notADatum)
+    {
+        --(d->retainCount);
+        if (d->retainCount <= 0)
+        {
+            if (d->alertOnDelete)
+            {
+                qDebug() << "DELETING: " << d << " " << d->showValue();
+            }
+            delete d;
+        }
     }
-  }
-  return *this;
 }
 
-DatumPtr &DatumPtr::operator=(DatumPtr *other) noexcept {
-  if (other != this) {
+DatumPtr::~DatumPtr()
+{
     destroy();
-    d = other->d;
-    d->retain();
-  }
-  return *this;
 }
 
-bool DatumPtr::operator==(DatumPtr *other) { return d == other->d; }
-
-bool DatumPtr::operator==(const DatumPtr &other) { return d == other.d; }
-
-bool DatumPtr::operator!=(DatumPtr *other) { return d != other->d; }
-
-bool DatumPtr::operator!=(const DatumPtr &other) { return d != other.d; }
-
-// This is true IFF EQUALP is true
-bool DatumPtr::isEqual(DatumPtr other, bool ignoreCase) {
-  if (d->isa() != other.isa())
-    return false;
-  if (d == other.d)
-    return true;
-  return d->isEqual(other, ignoreCase);
+DatumPtr &DatumPtr::operator=(const DatumPtr &other) noexcept
+{
+    if (&other != this)
+    {
+        destroy();
+        d = other.d;
+        if (d)
+        {
+            ++(d->retainCount);
+        }
+    }
+    return *this;
 }
 
-bool DatumPtr::isDotEqual(DatumPtr other) { return (d == other.d); }
-
-bool DatumPtr::isASTNode() { return d->isa() == Datum::astnodeType; }
-
-bool DatumPtr::isList() { return d->isa() == Datum::listType; }
-
-bool DatumPtr::isArray() { return d->isa() == Datum::arrayType; }
-
-bool DatumPtr::isWord() { return d->isa() == Datum::wordType; }
-
-bool DatumPtr::isError() { return d->isa() == Datum::errorType; }
-
-bool DatumPtr::isNothing() { return d == &notADatum; }
-
-Word *DatumPtr::wordValue() {
-  Q_ASSERT(d->isa() == Datum::wordType);
-  return (Word *)d;
+DatumPtr &DatumPtr::operator=(DatumPtr *other) noexcept
+{
+    if (other != this)
+    {
+        destroy();
+        d = other->d;
+        ++(d->retainCount);
+    }
+    return *this;
 }
 
-List *DatumPtr::listValue() {
-  if (d->isa() != Datum::listType) {
-    qDebug() << "Hello";
-  }
-  Q_ASSERT(d->isa() == Datum::listType);
-  return (List *)d;
+bool DatumPtr::operator==(DatumPtr *other)
+{
+    return d == other->d;
 }
 
-ListNode *DatumPtr::listNodeValue() {
-  if (d->isa() != Datum::listNodeType) {
-    qDebug() << "Hello";
-  }
-  Q_ASSERT(d->isa() == Datum::listNodeType);
-  return (ListNode *)d;
+bool DatumPtr::operator==(const DatumPtr &other)
+{
+    return d == other.d;
 }
 
-Array *DatumPtr::arrayValue() {
-  Q_ASSERT(d->isa() == Datum::arrayType);
-  return (Array *)d;
+bool DatumPtr::operator!=(DatumPtr *other)
+{
+    return d != other->d;
 }
 
-Procedure *DatumPtr::procedureValue() {
-  if (d->isa() != Datum::procedureType) {
-    qDebug() << "Hello";
-  }
-  Q_ASSERT(d->isa() == Datum::procedureType);
-  return (Procedure *)d;
+bool DatumPtr::operator!=(const DatumPtr &other)
+{
+    return d != other.d;
 }
 
-ASTNode *DatumPtr::astnodeValue() {
-  if (d->isa() != Datum::astnodeType) {
-    qDebug() << "Error here";
-  }
-  return (ASTNode *)d;
+bool DatumPtr::isASTNode()
+{
+    return d->isa() == Datum::astnodeType;
 }
 
-Error *DatumPtr::errorValue() {
-  Q_ASSERT(d->isa() == Datum::errorType);
-  return (Error *)d;
+bool DatumPtr::isList()
+{
+    return d->isa() == Datum::listType;
 }
 
-Datum::DatumType DatumPtr::isa() { return d->isa(); }
-
-QString DatumPtr::printValue(bool fullPrintp, int printDepthLimit,
-                           int printWidthLimit) {
-  return d->printValue(fullPrintp, printDepthLimit, printWidthLimit);
+bool DatumPtr::isArray()
+{
+    return d->isa() == Datum::arrayType;
 }
 
-QString DatumPtr::showValue(bool fullPrintp, int printDepthLimit,
-                          int printWidthLimit) {
-  return d->showValue(fullPrintp, printDepthLimit, printWidthLimit);
+bool DatumPtr::isWord()
+{
+    return d->isa() == Datum::wordType;
+}
+
+bool DatumPtr::isError()
+{
+    return d->isa() == Datum::errorType;
+}
+
+bool DatumPtr::isNothing()
+{
+    return d->isa() == Datum::noType;
+}
+
+Word *DatumPtr::wordValue()
+{
+    Q_ASSERT(d->isa() == Datum::wordType);
+    return (Word *)d;
+}
+
+List *DatumPtr::listValue()
+{
+    Q_ASSERT(d->isa() == Datum::listType);
+    return (List *)d;
+}
+
+Array *DatumPtr::arrayValue()
+{
+    Q_ASSERT(d->isa() == Datum::arrayType);
+    return (Array *)d;
+}
+
+Procedure *DatumPtr::procedureValue()
+{
+    Q_ASSERT(d->isa() == Datum::procedureType);
+    return (Procedure *)d;
+}
+
+ASTNode *DatumPtr::astnodeValue()
+{
+    Q_ASSERT(d->isa() == Datum::astnodeType);
+    return (ASTNode *)d;
+}
+
+Error *DatumPtr::errorValue()
+{
+    Q_ASSERT(d->isa() == Datum::errorType);
+    return (Error *)d;
+}
+
+Datum::DatumType DatumPtr::isa()
+{
+    return d->isa();
+}
+
+QString DatumPtr::printValue(bool fullPrintp, int printDepthLimit, int printWidthLimit)
+{
+    return d->printValue(fullPrintp, printDepthLimit, printWidthLimit);
+}
+
+QString DatumPtr::showValue(bool fullPrintp, int printDepthLimit, int printWidthLimit)
+{
+    return d->showValue(fullPrintp, printDepthLimit, printWidthLimit);
 }

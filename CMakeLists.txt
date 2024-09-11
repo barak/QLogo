@@ -1,12 +1,13 @@
 cmake_minimum_required(VERSION 3.5)
 
-project(QLogo VERSION 0.931 LANGUAGES CXX)
+project(QLogo VERSION 0.96 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
 set(QLOGO_BIN qlogo)
 set(QLOGO_GUI QLogo-GUI)
 set(QLOGO_HELP qlogo_help.db)
+set(QLOGO_LIB qlogo_library.db)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
@@ -23,11 +24,12 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(QT NAMES Qt6 REQUIRED COMPONENTS Widgets OpenGLWidgets Sql)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets OpenGLWidgets Sql)
+find_package(QT NAMES Qt6 REQUIRED COMPONENTS Widgets Sql Svg)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Sql Svg)
 
 set(QLOGO_DATA_DIR "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATADIR}/${QLOGO_BIN}")
 set(QLOGO_HELP_DB "${QLOGO_DATA_DIR}/${QLOGO_HELP}")
+set(QLOGO_LIB_DB "${QLOGO_DATA_DIR}/${QLOGO_LIB}")
 
 add_subdirectory("${QLOGO_BIN}")
 
@@ -35,7 +37,7 @@ add_subdirectory("${QLOGO_GUI}")
 
 file(MAKE_DIRECTORY "${QLOGO_DATA_DIR}")
 
-file(COPY "share/${QLOGO_HELP}"
+file(COPY "share/${QLOGO_HELP}" "share/${QLOGO_LIB}"
     DESTINATION "${QLOGO_DATA_DIR}"
 )
 
@@ -72,11 +74,8 @@ if (APPLE)
     set(QLOGO_BUNDLE_RESOURCES_DIR ${CMAKE_BINARY_DIR}/${QLOGO_GUI}/${QLOGO_GUI}.app/Contents/Resources)
     add_custom_target(QLogoBundleCp ALL
         COMMAND cp "${QLOGO_BIN_LOC}" "${QLOGO_BUNDLE_EXE_DIR}"
-        COMMAND cp "${QLOGO_HELP_DB}" "${QLOGO_BUNDLE_RESOURCES_DIR}"
+        COMMAND cp "${QLOGO_HELP_DB}" "${QLOGO_LIB_DB}" "${QLOGO_BUNDLE_RESOURCES_DIR}"
         DEPENDS "${QLOGO_GUI}" "${QLOGO_BIN}"
     )
 endif()
 
-# TODO: rm -rf ~/temp/qlogo
-# && cmake --install . --prefix ~/temp/qlogo
-# && /opt/Qt/6.5.1/macos/bin/macdeployqt /Users/jsikes/temp/qlogo/./QLogo-GUI.app -always-overwrite

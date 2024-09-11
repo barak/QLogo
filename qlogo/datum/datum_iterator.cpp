@@ -1,85 +1,40 @@
 
-//===-- qlogo/datum_iterator.cpp - Iterator class and subclasses implementations -------*-
-// C++ -*-===//
+//===-- qlogo/datum_iterator.cpp - class implementation --*- C++ -*-===//
 //
-// This file is part of QLogo.
+// Copyright 2017-2024 Jason Sikes
 //
-// QLogo is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// QLogo is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with QLogo.  If not, see <http://www.gnu.org/licenses/>.
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted under the conditions specified in the
+// license found in the LICENSE file in the project root.
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// This file contains the implementation of the Iterator class and subclasses.
-/// Iterators are used internally so they are rather minimal.
+/// This file contains the implementation of the ListIterator class.
+/// It is a minimalist iterator over QLogo List items.
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum_iterator.h"
-#include "datum_list.h"
-#include "datum_word.h"
-
+#include "datum.h"
 #include <qdebug.h>
 
-/******************************************
- *
- * Iterator
- *
- ******************************************/
-
-DatumPtr Iterator::element() {
-  Q_ASSERT(false);
-  return DatumPtr();
+ListIterator::ListIterator()
+{
 }
 
-bool Iterator::elementExists() {
-  Q_ASSERT(false);
-  return false;
+ListIterator::ListIterator(DatumPtr aList)
+{
+    ptr = aList;
 }
 
-/******************************************
- *
- * ListIterator
- *
- ******************************************/
-
-ListIterator::ListIterator() {}
-
-ListIterator::ListIterator(DatumPtr head) {
-    ptr = head;
-}
-
-DatumPtr ListIterator::element() {
-    DatumPtr retval = ptr.listNodeValue()->item;
-    ptr = ptr.listNodeValue()->next;
+DatumPtr ListIterator::element()
+{
+    DatumPtr retval = ptr.listValue()->head;
+    ptr = ptr.listValue()->tail;
     return retval;
 }
 
-bool ListIterator::elementExists() { return (ptr != nothing); }
-
-/******************************************
- *
- * ArrayIterator
- *
- ******************************************/
-
-ArrayIterator::ArrayIterator() {}
-
-ArrayIterator::ArrayIterator(QVector<DatumPtr> *aArray) {
-  arrayIter = aArray->begin();
-  end = aArray->end();
+bool ListIterator::elementExists()
+{
+    return ((!ptr.isNothing()) && (!(ptr.listValue()->head).isNothing()));
 }
-
-DatumPtr ArrayIterator::element() { return *arrayIter++; }
-
-bool ArrayIterator::elementExists() { return (arrayIter != end); }
