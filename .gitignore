@@ -1,5 +1,6 @@
 # Prerequisites
 *.d
+/build*
 
 # Compiled Object files
 *.slo
@@ -30,8 +31,6 @@
 *.exe
 *.out
 *.app
-QLogo
-logo
 
 # Emacs temp files
 *~
@@ -43,7 +42,8 @@ CMakeLists.txt.user*
 # doxygen output
 html
 
-# Added by Dolphin file manager GUI
+# Added by file manager GUIs
+.DS_Store
 .directory
 
 # CMake-generated files

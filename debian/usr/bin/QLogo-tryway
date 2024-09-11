@@ -1,11 +1,11 @@
 #! /bin/sh -f
 
-e=/usr/bin/QLogo
+e=/usr/bin/QLogo-GUI
 
 yes_way=false
 
 if [ ${XDG_SESSION_TYPE} = wayland ]; then
-    if [ $(dpkg --status qtwayland5 \
+    if [ $(dpkg --status qt6-wayland \
 	       | egrep '^Status:' \
 	       | cut --delimiter=' ' --fields=4) = installed ]; then
 	yes_way=true

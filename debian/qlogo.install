@@ -1,1 +1,3 @@
 debian/usr/bin/QLogo-tryway /usr/bin/
+QLogo-GUI.desktop /usr/share/applications/
+QLogo-GUI.png /usr/share/pixmaps/

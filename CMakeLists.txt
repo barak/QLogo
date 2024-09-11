@@ -1,45 +1,82 @@
-project(QLogo)
-
 cmake_minimum_required(VERSION 3.5)
 
-set(CMAKE_CXX_STANDARD 11)
+project(QLogo VERSION 0.931 LANGUAGES CXX)
+
+include(GNUInstallDirs)
+
+set(QLOGO_BIN qlogo)
+set(QLOGO_GUI QLogo-GUI)
+set(QLOGO_HELP qlogo_help.db)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-set(CMAKE_AUTOMOC ON)
-
-set(CMAKE_AUTOUIC ON)
-
-find_package(Qt5Widgets REQUIRED)
-
-set(QLOGO_SOURCES qlogo_main.cpp mainwindow.cpp canvas.cpp console.cpp)
-
-set(QLOGO_HEADERS mainwindow.h canvas.h console.h constants.h)
-
-set(QLOGO_UI mainwindow.ui)
-
-add_executable(QLogo ${QLOGO_SOURCES} ${QLOGO_HEADERS} ${QLOGO_UI})
-
-target_link_libraries(QLogo Qt5::Widgets)
-
-
-
-set(LOGO_SOURCES datum.cpp parser.cpp turtle.cpp vars.cpp kernel.cpp propertylists.cpp kernel_datastructureprimitives.cpp kernel_communication.cpp kernel_arithmetic.cpp kernel_graphics.cpp kernel_workspacemanagement.cpp workspace.cpp procedurehelper.cpp help.cpp kernel_controlstructures.cpp error.cpp library.cpp datum_word.cpp datum_astnode.cpp datum_list.cpp datum_array.cpp datum_datump.cpp datum_iterator.cpp logo_main.cpp qlogocontroller.cpp logocontroller.cpp controller.cpp)
-
-set(LOGO_HEADERS datum.h parser.h turtle.h vars.h kernel.h propertylists.h workspace.h procedurehelper.h help.h error.h constants.h qlogocontroller.h logocontroller.h controller.h)
-
-add_definitions(-DLOGOVERSION="0.93" -DCONTROLLER_HEADER="logo_controller.h")
-
-if(APPLE)
-  add_definitions(-DLOGOPLATFORM="OSX")
-elseif(WIN32 OR MINGW OR MSYS OR CYGWIN)
-  add_definitions(-DLOGOPLATFORM="WINDOWS")
-else()
-  add_definitions(-DLOGOPLATFORM="UNIX")
+if (CMAKE_BUILD_TYPE)
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
+    endif()
 endif()
 
-add_executable(logo ${LOGO_SOURCES} ${LOGO_HEADERS})
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
 
-target_link_libraries(logo Qt5::Core Qt5::Widgets)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-install(TARGETS QLogo logo RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+find_package(QT NAMES Qt6 REQUIRED COMPONENTS Widgets OpenGLWidgets Sql)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets OpenGLWidgets Sql)
+
+set(QLOGO_DATA_DIR "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATADIR}/${QLOGO_BIN}")
+set(QLOGO_HELP_DB "${QLOGO_DATA_DIR}/${QLOGO_HELP}")
+
+add_subdirectory("${QLOGO_BIN}")
+
+add_subdirectory("${QLOGO_GUI}")
+
+file(MAKE_DIRECTORY "${QLOGO_DATA_DIR}")
+
+file(COPY "share/${QLOGO_HELP}"
+    DESTINATION "${QLOGO_DATA_DIR}"
+)
+
+file(COPY "${CMAKE_SOURCE_DIR}/test"
+    DESTINATION "${CMAKE_BINARY_DIR}"
+)
+
+install(TARGETS "${QLOGO_GUI}" "${QLOGO_BIN}"
+    BUNDLE DESTINATION .
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(DIRECTORY "${QLOGO_DATA_DIR}"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}"
+)
+
+install(FILES "${QLOGO_GUI}.desktop"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
+)
+
+install(DIRECTORY "icons/hicolor"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/icons"
+)
+
+install(FILES "${QLOGO_GUI}.appdata.xml"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo"
+)
+
+if (APPLE)
+    set(MACOSX_BUNDLE_ICON_FILE ${QLOGO_GUI}.icns)
+    # Copy the qlogo binary and help database into the GUI bundle
+    set(QLOGO_BIN_LOC ${CMAKE_BINARY_DIR}/${QLOGO_BIN}/${QLOGO_BIN})
+    set(QLOGO_BUNDLE_EXE_DIR ${CMAKE_BINARY_DIR}/${QLOGO_GUI}/${QLOGO_GUI}.app/Contents/MacOS)
+    set(QLOGO_BUNDLE_RESOURCES_DIR ${CMAKE_BINARY_DIR}/${QLOGO_GUI}/${QLOGO_GUI}.app/Contents/Resources)
+    add_custom_target(QLogoBundleCp ALL
+        COMMAND cp "${QLOGO_BIN_LOC}" "${QLOGO_BUNDLE_EXE_DIR}"
+        COMMAND cp "${QLOGO_HELP_DB}" "${QLOGO_BUNDLE_RESOURCES_DIR}"
+        DEPENDS "${QLOGO_GUI}" "${QLOGO_BIN}"
+    )
+endif()
+
+# TODO: rm -rf ~/temp/qlogo
+# && cmake --install . --prefix ~/temp/qlogo
+# && /opt/Qt/6.5.1/macos/bin/macdeployqt /Users/jsikes/temp/qlogo/./QLogo-GUI.app -always-overwrite

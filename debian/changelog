@@ -1,3 +1,21 @@
+qlogo (0.94alpha3-1) UNRELEASED; urgency=medium
+
+  * Track upstream changes
+  * Transition from Qt5 to Qt6
+  * Upstream renamed README to README.md
+  * Need build dependency on cmake
+  * Need build dependency on libqt6opengl6-dev
+  * dh_installalternatives
+  * New upstream alpha release
+  * Patch for missing #include <signal.h>
+  * Fix for upstream installing binaries in /usr instead of /usr/bin
+  * Update QLogo-tryway to qt6
+  * Install upstream desktop file
+  * Install upstream icon
+  * Update standards version to 4.6.2, no changes needed.
+
+ -- Barak A. Pearlmutter <bap@debian.org>  Thu, 23 Mar 2023 14:13:33 +0000
+
 qlogo (0.92+git.1.29a5ca2-2) unstable; urgency=medium
 
   * Missing build dependency on cmake

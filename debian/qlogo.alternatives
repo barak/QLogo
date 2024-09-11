@@ -1,0 +1,9 @@
+Name: logo
+Link: /usr/bin/logo
+Alternative: /usr/bin/qlogo
+Priority: 20
+
+Name: logo
+Link: /usr/bin/logo
+Alternative: /usr/bin/QLogo-GUI
+Priority: 15
