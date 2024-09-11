@@ -1,6 +1,6 @@
-qlogo (0.94alpha3-1) UNRELEASED; urgency=medium
+qlogo (0.96-1) UNRELEASED; urgency=medium
 
-  * Track upstream changes
+  * New upstream version
   * Transition from Qt5 to Qt6
   * Upstream renamed README to README.md
   * Need build dependency on cmake
@@ -13,8 +13,10 @@ qlogo (0.94alpha3-1) UNRELEASED; urgency=medium
   * Install upstream desktop file
   * Install upstream icon
   * Update standards version to 4.6.2, no changes needed.
+  * Update debian/watch uscan support file
+  * Bump policy
 
- -- Barak A. Pearlmutter <bap@debian.org>  Thu, 23 Mar 2023 14:13:33 +0000
+ -- Barak A. Pearlmutter <bap@debian.org>  Wed, 11 Sep 2024 20:51:59 +0100
 
 qlogo (0.92+git.1.29a5ca2-2) unstable; urgency=medium
 
