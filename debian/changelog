@@ -3,14 +3,14 @@ qlogo (0.961-1) unstable; urgency=medium
   * New upstream version
   * Transition from Qt5 to Qt6
   * Upstream renamed README to README.md
-  * Need build dependency on cmake
-  * Need build dependency on libqt6opengl6-dev
+  * Build dependencies: cmake, libqt6opengl6-dev, qt6-svg-dev
   * dh_installalternatives
   * Update QLogo-tryway to qt6
   * Install upstream desktop file
   * Install upstream icon
-  * Update standards version, no changes needed.
+  * Update standards version
   * Update debian/watch uscan support file
+  * Update debian/copyright
 
  -- Barak A. Pearlmutter <bap@debian.org>  Thu, 12 Sep 2024 08:13:14 +0100
 
