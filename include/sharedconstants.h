@@ -30,10 +30,11 @@ class LogoController;
 
 enum messageCategory : message_t
 {
-    W_ZERO = 0,       // Zeroes get ignored
-    W_INITIALIZE,     // The initialization message, either request or response
-    W_CLOSE_PIPE,     // The interpreter tells the GUI to close the iter-process pipe
-    W_SET_SCREENMODE, // Set the screenmode (splitscreen, fullscreen, textscreen)
+    W_ZERO = 0,             // Zeroes get ignored
+    W_INITIALIZE,           // The initialization message, either request or response
+    W_CLOSE_PIPE,           // The interpreter tells the GUI to close the iter-process pipe
+    W_SET_SCREENMODE,       // Set the screenmode (splitscreen, fullscreen, textscreen)
+    W_FILE_DIALOG_GET_PATH, // Query user for a file path using modal file dialog.
 
     S_SYSTEM,   // SYSTEM signal (End everything)
     S_TOPLEVEL, // TOPLEVEL signal (End currently-running procedure, drop back to prompt)
@@ -213,7 +214,6 @@ class Config
     const char *defaultHelpDbFilename = "qlogo_help.db";
 };
 
-
 enum PenModeEnum
 {
     /// @brief The paint pen mode, draws the current foreground color.
@@ -234,7 +234,8 @@ enum TurtleModeEnum
     /// @brief The fence turtle mode, prevents the turtle from leaving the canvas.
     turtleFence,
 
-    /// @brief The window turtle mode, turtle can leave the canvas.
+    /// @brief The window turtle mode, where the canvas bounds grow to accommodate the
+    /// turtle's position as needed.
     turtleWindow
 };
 

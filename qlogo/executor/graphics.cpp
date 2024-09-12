@@ -519,12 +519,12 @@ DatumPtr Kernel::excWrap(DatumPtr node)
 /***DOC WINDOW
 WINDOW
 
-    tells the turtle to enter window mode:  From now on, if the turtle
-    is asked to move past the boundary of the graphics window, it
-    will move offscreen.  The visible graphics window is considered
-    as just part of an infinite graphics plane; the turtle can be
-    anywhere on the plane.  (If you lose the turtle, HOME will bring
-    it back to the center of the window.)  Compare WRAP and FENCE.
+    tells the turtle to enter adaptive mode:  From now on, if the turtle
+    is asked to move past the boundary of the graphics window, the
+    boundary will grow to accomodate the turtle's new position. Note
+    that the lower and left boundaries are the negatives of the upper
+    and right boundaries and that the origin is always in the center.
+    Compare WRAP and FENCE.
 
 COD***/
 // CMD WINDOW 0 0 0
@@ -575,7 +575,7 @@ BOUNDS
     of the canvas. See SETBOUNDS.
 
 COD***/
-// CMD BOUNDS 2 2 2
+// CMD BOUNDS 0 0 0
 DatumPtr Kernel::excBounds(DatumPtr node)
 {
     ProcedureHelper h(this, node);

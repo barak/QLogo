@@ -42,6 +42,8 @@ class LogoControllerGUI : public LogoController
     QString rawLine;
     QChar rawChar;
 
+    QString filePath;
+
     int cursorRow;
     int cursorCol;
 
@@ -108,6 +110,8 @@ class LogoControllerGUI : public LogoController
     /// @note This function is blocking. It will wait for a character to be
     /// available in the input queue.
     DatumPtr readchar();
+
+    QString fileDialogModal();
 
     /// @brief Edits text in the GUI.
     /// @param startText The text to edit.
@@ -312,7 +316,7 @@ class LogoControllerGUI : public LogoController
 
     /// @brief Sets the pen size.
     /// @param aSize The new pen size.
-    void setPensize(double);
+    void setPensize(qreal);
 
     /// @brief Waits for a number of milliseconds.
     /// @param msecs The number of milliseconds to wait.

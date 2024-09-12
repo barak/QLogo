@@ -21,7 +21,6 @@
 #include <QDataStream>
 #include <QMainWindow>
 #include <QProcess>
-#include <functional>
 
 class Canvas;
 class Console;
@@ -55,7 +54,8 @@ class MainWindow : public QMainWindow
 
     Ui::MainWindow *ui;
 
-    QProcess *logoProcess;
+    QByteArray readBuffer;
+    qint64 readBufferLen = 0;
 
     windowMode_t windowMode;
     bool hasShownCanvas = false;
@@ -66,8 +66,6 @@ class MainWindow : public QMainWindow
     void beginReadChar();
     void sendConsoleCursorPosition();
 
-    void sendMessage(std::function<void(QDataStream *)> func);
-
     void initialize();
     void introduceCanvas();
     void setSplitterforMode(ScreenModeEnum mode);
@@ -76,12 +74,16 @@ class MainWindow : public QMainWindow
     void sendCanvasImage();
     void sendCanvasSvg();
 
+    // Show user a file dialog modal window.
+    void fileDialogModal();
+
+    void processReadBuffer();
+
   protected:
     void closeEvent(QCloseEvent *event);
     QString findQlogoExe();
 
   public:
-
     /// @brief Constructor.
     ///
     /// @param parent The Qt parent widget.
@@ -103,21 +105,12 @@ class MainWindow : public QMainWindow
 
     /// @brief Handle the standard output of the QLogo process.
     void readStandardOutput();
-  
+
     /// @brief Handle the standard error of the QLogo process.
     void readStandardError();
 
-    /// @brief Handle the start of the QLogo process.
-    /// @note This is mostly for debugging to ensure the process is started
-    /// correctly.
-    void processStarted();
-
     /// @brief Handle the end of the QLogo process. Initiate shutdown of the GUI.
     void processFinished(int exitCode, QProcess::ExitStatus exitStatus);
-
-    /// @brief Handle an error in the QLogo process.
-    /// @note This is mostly for debugging to print out a debug message.
-    void errorOccurred(QProcess::ProcessError error);
 
     /// @brief Handle a rawline being sent to the QLogo process.
     void sendRawlineSlot(const QString &line);
