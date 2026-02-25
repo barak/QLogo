@@ -17,157 +17,185 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum.h"
-#include "library.h"
-#include "workspace/workspace.h"
+#include "compiler_types.h"
+#include "datum_ptr.h"
+#include "workspace/library.h"
 #include <QHash>
 
-/// @brief A structure to hold a command's details for the parser.
-/// @note This is used to map a command name to its method, minimum, default, and maximum
-/// parameter counts.
+/// @brief A structure to hold a command's details for the treeifyer.
+/// @note This is used to map a command name to its method, minimum, default, maximum
+/// parameter counts, and return data type.
 struct Cmd_t
 {
-    /// @brief The method to call for this command.
-    KernelMethod method;
+    /// @brief The compiler method to generate code for this command.
+    Generator method;
 
     /// @brief The minimum number of parameters this command expects.
+    /// @note -1 means no minimum number of tokens, all tokens are parsed without expression parsing, "raw" tokens.
     int countOfMinParams;
 
     /// @brief The number of default parameters this command expects.
+    /// @note -1 means special form, read until EOL.
     int countOfDefaultParams;
 
     /// @brief The maximum number of parameters this command expects.
+    /// @note -1 means unlimited.
     int countOfMaxParams;
+
+    /// @brief The data type(s) that this procedure is expected to return.
+    RequestReturnType returnType;
 };
 
 /// @brief The procedures class.
 /// @note This is the main class for managing procedures in QLogo. It holds all
 /// user-defined and library procedures.
-class Procedures : public Workspace
+class Procedures
 {
     QHash<QString, Cmd_t> stringToCmd;
 
     QHash<QString, DatumPtr> procedures;
     qint64 lastProcedureCreatedTimestamp;
 
-    DatumPtr procedureForName(QString aName);
-    bool isNamedProcedure(QString aName);
+    DatumPtr procedureForName(const QString &aName) const;
+    bool isNamedProcedure(const QString &aName) const;
 
-    Library stdLib;
+    // Helper methods for createProcedure
+    Procedure* initializeProcedureBody(const DatumPtr &cmd, const QList<DatumPtr> &sourceText);
+    void parseProcedureParameters(const DatumPtr &cmd, const DatumPtr &text, Procedure *body);
+    void processWordParameter(const DatumPtr &cmd, const DatumPtr &currentParam, Procedure *body,
+                             bool &isOptionalDefined, bool &isRestDefined, bool &isDefaultDefined);
+    void processListParameter(const DatumPtr &cmd, const DatumPtr &currentParam, Procedure *body,
+                              bool &isOptionalDefined, bool &isRestDefined, bool &isDefaultDefined);
+    void setupInstructionList(const DatumPtr &text, Procedure *body);
+    void processTags(Procedure *body);
 
-  public:
-
-    /// @brief Constructor.
+    /// @brief Private constructor for singleton pattern.
     Procedures();
 
+    Procedures(const Procedures &) = delete;
+    Procedures(Procedures &&) = delete;
+    Procedures &operator=(const Procedures &) = delete;
+    Procedures &operator=(Procedures &&) = delete;
+
+  public:
+    /// @brief Get the singleton instance of the Procedures class.
+    /// @return The singleton instance of the Procedures class.
+    static Procedures &get()
+    {
+        static Procedures instance;
+        return instance;
+    }
+
     /// @brief Destructor.
-    ~Procedures();
+    ~Procedures() = default;
 
     /// @brief Return the timestamp of the last procedure creation.
     /// @return The timestamp of the last procedure creation.
-    qint64 timeOfLastProcedureCreation()
+    qint64 timeOfLastProcedureCreation() const
     {
         return lastProcedureCreatedTimestamp;
     }
 
-    /// @brief Create an AST from a list.
-    /// @param aList The list to create an AST from.
-    /// @return A pointer to the created ASTList.
-    /// @note A list can contain several commands, so this returns a list of ASTNode roots,
-    /// with each root representing a command.
-    QList<DatumPtr> *astFromList(List *aList);
-
     /// @brief Create a procedure from a command and its text.
     /// @param cmd The name of the command.
     /// @param text The text to create a procedure from, in the form of a list of sublists.
-    /// @param sourceText The source text to create a procedure from, or 'nothing' if there
+    /// @param sourceText The source text to create a procedure from, or an empty list if there
     /// was no source text.
     /// @return A pointer to the created procedure.
     /// @note This creates and returns a Procedure object from a command and its text. It
     /// does not save the procedure to the procedures hash table.
-    DatumPtr createProcedure(DatumPtr cmd, DatumPtr text, DatumPtr sourceText);
+    DatumPtr createProcedure(const DatumPtr &cmd, const DatumPtr &text, const QList<DatumPtr> &sourceText);
 
     /// @brief Define a procedure.
     /// @param cmd The command used to define the procedure (TO or .MACRO).
     /// @param procnameP The name of the procedure to define.
     /// @param text The text to define a procedure from, in the form of a list of sublists.
-    /// @param sourceText The source text to define a procedure from, or 'nothing' if there
+    /// @param sourceText The source text to define a procedure from, or an empty list if there
     /// was no source text.
     /// @note This creates a Procedure object and saves it to the procedures hash table.
-    void defineProcedure(DatumPtr cmd, DatumPtr procnameP, DatumPtr text, DatumPtr sourceText);
+    void defineProcedure(const DatumPtr &cmd,
+                         const DatumPtr &procnameP,
+                         const DatumPtr &text,
+                         const QList<DatumPtr> &sourceText);
 
     /// @brief Copy a procedure to a new name.
     /// @param newnameP The new name to copy the procedure to.
     /// @param oldnameP The name of the procedure to copy.
-    void copyProcedure(DatumPtr newnameP, DatumPtr oldnameP);
+    void copyProcedure(const DatumPtr &newnameP, const DatumPtr &oldnameP);
 
     /// @brief Erase a procedure.
     /// @param procnameP The name of the procedure to erase.
-    void eraseProcedure(DatumPtr procnameP);
+    void eraseProcedure(const DatumPtr &procnameP);
 
-    /// @brief Erase all procedures.
-    void eraseAllProcedures();
+    /// @brief Get an AST node from a procedure.
+    /// @param cmdP The name of the procedure to search for.
+    /// @return A tuple containing a pointer to the created AST node, and three integers representing the arity of the procedure.
+    ///         If the procedure is not found, returns a tuple with nothing() as the first element.
+    std::tuple<DatumPtr, int, int, int> astnodeFromProcedure(const DatumPtr &cmdP) const;
+
+    /// @brief Get an AST node from a primitive command.
+    /// @param cmdP The name of the command to search for.
+    /// @return A tuple containing a pointer to the created AST node, and three integers representing the arity of the command.
+    ///         If the command is not found, returns a tuple with nothing() as the first element.
+    std::tuple<DatumPtr, int, int, int> astnodeFromPrimitive(const DatumPtr &cmdP) const;
 
     /// @brief Get an AST node from a command, either a primitive or user-defined procedure.
     /// @param command The name of the command to search for.
-    /// @param minParams The minimum number of parameters this command expects.
-    /// @param defaultParams The number of default parameters this command expects.
-    /// @param maxParams The maximum number of parameters this command expects.
-    DatumPtr astnodeFromCommand(DatumPtr command, int &minParams, int &defaultParams, int &maxParams);
+    /// @return A tuple containing a pointer to the created AST node, and three integers representing the arity of the command.
+    std::tuple<DatumPtr, int, int, int> astnodeFromCommand(const DatumPtr &command) const;
 
     /// @brief Get the text of a procedure.
     /// @param procnameP The name of the procedure to get the text of.
     /// @return A pointer to the text of the procedure, in the form of a list of sublists.
-    DatumPtr procedureText(DatumPtr procnameP);
+    DatumPtr procedureText(const DatumPtr &procnameP) const;
 
     /// @brief Get the full text of a procedure.
     /// @param procnameP The name of the procedure to get the full text of.
     /// @param shouldValidate Whether to validate the procedure.
-    /// @return A pointer to the full text of the procedure, in the form of a list of
-    /// sublists.
-    DatumPtr procedureFulltext(DatumPtr procnameP, bool shouldValidate = true);
+    /// @return A list of the full text of the procedure, in the form of a list of
+    /// words.
+    DatumPtr procedureFulltext(const DatumPtr &procnameP, bool shouldValidate = true) const;
 
     /// @brief Get the title of a procedure.
     /// @param procnameP The name of the procedure to get the title of.
     /// @return A string containing the title of the procedure. A title is the first line
     /// of the procedure's source text, starting with 'TO' or '>MACRO'.
-    QString procedureTitle(DatumPtr procnameP);
+    QString procedureTitle(const DatumPtr &procnameP) const;
 
     /// @brief Check if a name is a procedure.
     /// @param procname The name to check.
     /// @return True if the name is a procedure, false otherwise.
-    bool isProcedure(QString procname);
+    bool isProcedure(const QString &procname) const;
 
     /// @brief Check if a name is a macro.
     /// @param procname The name to check.
     /// @return True if the name is a macro, false otherwise.
-    bool isMacro(QString procname);
+    bool isMacro(const QString &procname) const;
 
     /// @brief Check if a name is a primitive.
     /// @param procname The name to check.
     /// @return True if the name is a primitive, false otherwise.
-    bool isPrimitive(QString procname);
+    bool isPrimitive(const QString &procname) const;
 
     /// @brief Check if a name is defined.
     /// @param procname The name to check.
     /// @return True if the name is defined, false otherwise.
     /// @note This checks both user-defined and primitive procedures.
-    bool isDefined(QString procname);
+    bool isDefined(const QString &procname) const;
 
     /// @brief Get all procedure names.
-    /// @param showWhat Whether to show buried or unburied procedures.
     /// @return A pointer to a list of all procedure names.
-    DatumPtr allProcedureNames(showContents_t showWhat);
+    DatumPtr allProcedureNames() const;
 
     /// @brief Get all primitive procedure names.
     /// @return A pointer to a list of all primitive procedure names.
-    DatumPtr allPrimitiveProcedureNames();
+    DatumPtr allPrimitiveProcedureNames() const;
 
     /// @brief Get the arity of a procedure.
     /// @param nameP The name of the procedure to get the arity of.
     /// @return A pointer to the arity of the procedure, in the form of a list of three
     /// integers: the minimum, default, and maximum number of parameters.
-    DatumPtr arity(DatumPtr nameP);
+    DatumPtr arity(const DatumPtr &nameP) const;
 
     /// @brief Create an AST node from a command and its parameters.
     /// @param cmd The command to create an AST node from.
@@ -175,35 +203,7 @@ class Procedures : public Workspace
     /// @return A pointer to the created AST node.
     /// @note This creates an AST node from a command and its parameters, in a form suitable
     /// for use in the APPLY command.
-    DatumPtr astnodeWithLiterals(DatumPtr cmd, DatumPtr params);
-
-    /// @brief Convert a datum to a string.
-    /// @param aDatum The datum to convert to a string.
-    /// @param isInList Whether the datum is in a list.
-    /// @return A string representation of the datum, suitable for use in a source text.
-    QString unreadDatum(DatumPtr aDatum, bool isInList = false);
-
-    /// @brief Convert a list to a string.
-    /// @param aList The list to convert to a string.
-    /// @param isInList Whether the list is inside another list.
-    /// @return A string representation of the list, suitable for use in a source text.
-    QString unreadList(List *aList, bool isInList = false);
-
-    /// @brief Convert a word to a string.
-    /// @param aWord The word to convert to a string.
-    /// @param isInList Whether the word is inside a list.
-    /// @return A string representation of the word, suitable for use in a source text.
-    QString unreadWord(Word *aWord, bool isInList = false);
-
-    /// @brief Convert an array to a string.
-    /// @param anArray The array to convert to a string.
-    /// @return A string representation of the array, suitable for use in a source text.
-    QString unreadArray(Array *anArray);
-
-    /// @brief Convert a datum to a string.
-    /// @param aDatum The datum to convert to a string.
-    /// @return A string representation of the datum, suitable for use in a source text.
-    QString printoutDatum(DatumPtr aDatum);
+    DatumPtr astnodeWithLiterals(const DatumPtr &cmd, const DatumPtr &params);
 };
 
 /// @brief The procedure class.
@@ -213,10 +213,10 @@ class Procedure : public Datum
 {
 
   public:
-
     /// @brief Constructor.
     Procedure()
     {
+        isa = typeProcedure;
     }
 
     /// @brief The parameter names of the required inputs of the procedure.
@@ -235,32 +235,29 @@ class Procedure : public Datum
     int countOfMinParams = 0;
     /// @brief The number of default parameters this procedure expects.
     int countOfDefaultParams = 0;
-    /// @brief The maximum number of parameters this procedure accepts  .
+    /// @brief The maximum number of parameters this procedure accepts.
     int countOfMaxParams = -1;
 
     /// @brief A hash table to map tag names to the lines in the source text.
-    /// @note for GOTO.
-    QHash<const QString, DatumPtr> tagToLine;
+    QHash<QString, DatumPtr> tagToLine;
+
+    /// @brief A hash table to map tag names to the block ID for efficient execution.
+    QHash<QString, int32_t> tagToBlockId;
 
     /// @brief Whether this procedure is a macro.
     bool isMacro = false;
 
     /// @brief The source text of the procedure.
     /// @note This is a list of sublists, with each sublist representing a line of the
-    /// source text. The source text begins with the word 'TO' or 'MACRO' and ends with
+    /// source text. The source text begins with the word 'TO' or '.MACRO' and ends with
     /// the word 'END'.
-    DatumPtr sourceText;
+    // TODO: Should this be a list of words, since each line is a word?
+    QList<DatumPtr> sourceText;
 
     /// @brief The instruction list of the procedure.
     /// @note This is a list of lists, with each sublist representing a line of instruction.
+    /// TODO This should be a deep copy of the source lists, to prevent direct modification.
     DatumPtr instructionList;
-
-    /// @brief Return the type of the datum.
-    /// @return The type of the datum.
-    DatumType isa()
-    {
-        return Datum::procedureType;
-    }
 };
 
 #endif // PROCEDURES_H

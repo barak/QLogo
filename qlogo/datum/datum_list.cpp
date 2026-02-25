@@ -16,168 +16,179 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum.h"
+#include "compiler.h"
+#include "datum_types.h"
+#include "treeifyer.h"
+#include "workspace/visited.h"
 #include <QObject>
 #include <qdebug.h>
 
-QList<void *> listVisited;
-QList<void *> otherListVisited;
-
-List::List()
+List::List(const DatumPtr &item, List *srcList)
 {
-    astParseTimeStamp = 0;
-}
-
-List::List(Array *source)
-{
-    for (auto &aryIter : source->array)
-    {
-        append(aryIter);
-    }
-}
-
-List::List(DatumPtr item, List *srcList)
-{
+    isa = Datum::typeList;
     head = item;
-    if (!srcList->head.isNothing())
-    {
-        tail = DatumPtr(srcList);
-        lastNode = srcList->lastNode;
-    }
-    else
-    {
-        lastNode = DatumPtr(this);
-    }
-    astParseTimeStamp = 0;
+    tail = DatumPtr(srcList);
 }
 
 List::~List()
 {
-}
-
-Datum::DatumType List::isa()
-{
-    return listType;
-}
-
-QString List::printValue(bool fullPrintp, int printDepthLimit, int printWidthLimit)
-{
-    if (head.isNothing())
-        return "";
-    DatumPtr iter = DatumPtr(this);
-    if ((printDepthLimit == 0) || (printWidthLimit == 0))
+    try
     {
-        return "...";
+        clear();
     }
-    int printWidth = printWidthLimit - 1;
-    QString retval = iter.listValue()->head.showValue(fullPrintp, printDepthLimit - 1, printWidthLimit);
-    while (iter.listValue()->tail != nothing)
+    catch (...)
     {
-        iter = iter.listValue()->tail;
-        retval.append(' ');
-        if (printWidth == 0)
+        // Destructors must not throw exceptions. Log the error and continue.
+        // The collection removal may have failed, but we still need to complete
+        // the destruction of this object.
+        qDebug() << "Exception caught in List destructor during cleanup";
+    }
+}
+
+QString List::toString(ToStringFlags flags, int printDepthLimit, int printWidthLimit, VisitedSet *visited) const
+{
+    bool shouldShowBrackets = (flags & ToStringFlags_Show) != 0;
+    QString retval = shouldShowBrackets ? "[" : "";
+    std::unique_ptr<VisitedSet> localVisited;
+    int printWidth = printWidthLimit - 1;
+    const List *l = this;
+
+    if (this == EmptyList::instance())
+        goto exit;
+    if (printDepthLimit == 0)
+    {
+        retval.append("...");
+        goto exit;
+    }
+
+    if (visited == nullptr)
+    {
+        localVisited = std::make_unique<VisitedSet>();
+        visited = localVisited.get();
+    }
+
+    // Any words within a collection don't need to be formatted as source code.
+    flags = (Datum::ToStringFlags)(flags & ~(Datum::ToStringFlags_Source));
+    // Any lists within a collection need to show their brackets.
+    flags = (Datum::ToStringFlags)(flags | Datum::ToStringFlags_Show);
+
+    while (!l->isEmpty())
+    {
+        if (l != this)
         {
-            retval.append("...");
-            break;
+            retval.append(' ');
         }
-        retval.append(iter.listValue()->head.showValue(fullPrintp, printDepthLimit - 1, printWidthLimit));
+        if ((printWidth == 0) || (visited->contains(l)))
+        {
+            // We have reached the print width limit or have a cycle, so stop traversing the list.
+            retval.append("...");
+            goto exit;
+        }
+        visited->add(l);
+        retval.append(l->head.toString(flags, printDepthLimit - 1, printWidthLimit, visited));
         --printWidth;
+        l = l->tail.listValue();
+    }
+
+exit:
+    visited->remove(this);
+    if (shouldShowBrackets)
+    {
+        retval.append(']');
     }
     return retval;
 }
 
-QString List::showValue(bool fullPrintp, int printDepthLimit, int printWidthLimit)
+bool List::isEmpty() const
 {
-    if (!listVisited.contains(this))
-    {
-        listVisited.push_back(this);
-        QString retval = "[";
-        retval.append(printValue(fullPrintp, printDepthLimit, printWidthLimit));
-        retval.append(']');
-        listVisited.removeOne(this);
-        return retval;
-    }
-    return "...";
+    return this == EmptyList::instance();
 }
 
-bool List::isEmpty()
+DatumPtr List::itemAtIndex(int anIndex) const
 {
-    return head.isNothing();
-}
-
-void List::setButfirstItem(DatumPtr aValue)
-{
-    Q_ASSERT(head != nothing);
-    Q_ASSERT(aValue.isList());
-    tail = aValue;
-    lastNode = aValue.listValue()->lastNode;
-    astParseTimeStamp = 0;
-}
-
-DatumPtr List::itemAtIndex(int anIndex)
-{
-    DatumPtr ptr(this);
+    const List *iter = this;
     while (anIndex > 1)
     {
         --anIndex;
-        ptr = ptr.listValue()->tail;
+        iter = iter->tail.listValue();
     }
-    return ptr.listValue()->head;
+    return iter->head;
 }
 
 void List::clear()
 {
-    head = nothing;
-    tail = nothing;
-    lastNode = nothing;
-    astList.clear();
-    astParseTimeStamp = 0;
+    Q_ASSERT(this != EmptyList::instance());
+    head = nothing();
+    tail = nothing();
+    if (compileTimeStamp > 0)
+        Compiler::destroyCompiledTextForDatum(this);
+    compileTimeStamp = 0;
 }
 
-// This should only be used when initializing a list. It should not be used
-// after list has been made available to the user.
-void List::append(DatumPtr element)
-{
-    astParseTimeStamp = 0;
-
-    if (head == nothing)
-    {
-        head = element;
-        tail = nothing;
-        lastNode = nothing;
-        return;
-    }
-
-    List *l = new List();
-    l->head = element;
-    l->tail = nothing;
-    l->lastNode = nothing;
-    DatumPtr lP(l);
-
-    if (tail == nothing)
-    {
-        tail = lP;
-        lastNode = tail;
-        return;
-    }
-
-    lastNode.listValue()->tail = lP;
-    lastNode = lP;
-}
-
-int List::count()
+int List::count() const
 {
     int retval = 0;
-    DatumPtr ptr(this);
-    while (ptr.isList() && (!ptr.listValue()->head.isNothing()))
+    const List *iter = this;
+    VisitedSet visited;
+    while (iter != EmptyList::instance())
     {
         ++retval;
-        ptr = ptr.listValue()->tail;
+        if (visited.contains(iter))
+        {
+            // TODO: How should we report a cycle? -1? 0?
+            //  Not MAX_INT because that's a positive number.
+            return retval;
+        }
+        visited.add(iter);
+        iter = iter->tail.listValue();
     }
     return retval;
 }
 
-ListIterator List::newIterator()
+ListIterator List::newIterator() const
 {
-    return ListIterator(this);
+    // Safe: ListIterator only reads from the list, it never modifies it.
+    // The const_cast is needed because DatumPtr constructor takes non-const Datum*.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    return {const_cast<List *>(this)};
+}
+
+// EmptyList singleton implementation
+EmptyList *EmptyList::instance_ = nullptr;
+
+EmptyList::EmptyList() : List(nothing(), nullptr)
+{
+    isa = Datum::typeEmptyList;
+}
+
+EmptyList *EmptyList::instance()
+{
+    if (instance_ == nullptr)
+    {
+        instance_ = new EmptyList();
+    }
+    return instance_;
+}
+
+void EmptyList::clear()
+{
+    // EmptyList is immutable - do nothing
+    Q_ASSERT(false && "Attempted to modify immutable EmptyList");
+}
+
+QString EmptyList::toString(ToStringFlags flags,
+                            int /* printDepthLimit */,
+                            int /* printWidthLimit */,
+                            VisitedSet * /* visited */) const
+{
+    bool shouldShowBrackets = (flags & ToStringFlags_Show) != 0;
+    return shouldShowBrackets ? "[]" : "";
+}
+
+// Value to represent an empty list
+// Use function-local static to avoid exceptions during global static initialization
+const DatumPtr &emptyList()
+{
+    static const DatumPtr instance(EmptyList::instance());
+    return instance;
 }

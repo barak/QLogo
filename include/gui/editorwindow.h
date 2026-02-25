@@ -35,21 +35,21 @@ class EditorWindow : public QMainWindow
     Q_OBJECT
 
     Ui::EditorWindow *ui;
-    bool eventFilter(QObject *watched, QEvent *event);
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
   public:
     /// @brief Constructor.
-    explicit EditorWindow(QWidget *parent = 0);
+    explicit EditorWindow(QWidget *parent = nullptr);
 
     /// @brief Destructor.
-    ~EditorWindow();
+    ~EditorWindow() override;
 
     /// @brief Set the contents of the editor window.
     ///
     /// This function sets the contents of the editor window to the given text.
     ///
     /// @param startingText The text to present to the user for editing.
-    void setContents(const QString startingText);
+    void setContents(const QString &startingText);
 
     /// @brief Show the editor window.
     void show();

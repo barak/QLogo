@@ -1,0 +1,127 @@
+#ifndef READER_H
+#define READER_H
+
+//===-- qlogo/reader.h - Reader class definition -------*- C++ -*-===//
+//
+// Copyright 2017-2024 Jason Sikes
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted under the conditions specified in the
+// license found in the LICENSE file in the project root.
+//
+//===----------------------------------------------------------------------===//
+///
+/// \file
+/// This file contains the declaration of the TextStream, which is
+/// responsible for reading and writing text through a text stream or through
+/// standard I/O. It provides tokenization of text into a list of tokens.
+///
+/// Other operations simply pass through to the underlying QTextStream.
+///
+//===----------------------------------------------------------------------===//
+
+#include "datum_types.h"
+#include <QTextStream>
+
+class TextStream
+{
+    // Keep the most recent history in case it's needed as source material.
+    // (This is a List of RawLines.)
+    QList<DatumPtr> recentLineHistory;
+
+    // Clear the recent Line History.
+    void clearLineHistory();
+
+    // The stream source/destination. If nullptr then use standard Input and Output.
+    QTextStream *stream;
+
+    // The work of List/Array reading is done here. Will call itself to process
+    // sublists and subarrays.
+    DatumPtr tokenizeListWithPrompt(const QString &prompt, bool isBaseLevel, bool makeArray, bool shouldRemoveComments);
+
+    DatumPtr tokenizeRawlineWithPrompt(const QString &prompt);
+
+    DatumPtr tokenizeWordWithPrompt(const QString &prompt);
+
+    // Helper methods for tokenizeListWithPrompt
+    bool initializeBaseLevelReading(const QString &prompt);
+    bool processVbarredCharacter(ushort c, bool &isVbarred, bool &isCurrentWordVbarred, QString &currentWord);
+    bool processTildeContinuation();
+    bool processComments(ushort c, bool shouldRemoveComments);
+    enum class DelimiterResult { Continue, ReturnList, ReturnArray, AppendSublist, AppendSubarray };
+    DelimiterResult processDelimiter(ushort c, ListBuilder &builder, QString &currentWord, bool &isCurrentWordVbarred,
+                                     bool isBaseLevel, bool makeArray, bool shouldRemoveComments);
+    int processArrayOrigin();
+    bool finalizeResult(ListBuilder &builder, bool isBaseLevel, bool makeArray, DatumPtr &result);
+
+    // Additional helper methods for tokenizeListWithPrompt
+    DatumPtr processCharacterLoop(ListBuilder &builder, QString &currentWord, bool &isCurrentWordVbarred,
+                                   bool isBaseLevel, bool makeArray, bool shouldRemoveComments);
+    void addCurrentWordToBuilder(ListBuilder &builder, QString &currentWord, bool isCurrentWordVbarred);
+    DatumPtr handleDelimiterResult(DelimiterResult result, ListBuilder &builder);
+
+    // The current source word for string parsing.
+    QString listSourceWord;
+    QString::iterator listSourceWordIter;
+
+  public:
+    /// @brief Create a TextStream object using a QTextStream as source/destination.
+    /// @param aStream The QTextStream to use. Use nullptr for the standardIO streams.
+    TextStream(QTextStream *aStream);
+
+    /// @brief Returns the exact string of characters as they appear
+    /// in the line.
+    /// @param prompt The prompt to display to the user.
+    /// @return The line as a Word object, or nothing if no input is available.
+    DatumPtr readRawlineWithPrompt(const QString &prompt);
+
+    /// @brief Returns a line read as a word. Backslashes, vertical bars, and tilde
+    /// characters are processed.
+    /// @param prompt The prompt to display to the user.
+    /// @return The line as a Word object, or nothing if no input is available.
+    DatumPtr readWordWithPrompt(const QString &prompt);
+
+    /// @brief Reads a line as a list.
+    /// @param prompt The prompt to display to the user.
+    /// @param shouldRemoveComments If true, remove QLogo-formatted comments from the list.
+    /// @return The line as a List object, or nothing if no input is available.
+    DatumPtr readListWithPrompt(const QString &prompt, bool shouldRemoveComments);
+
+    /// @brief Read a single character. No formatting is applied.
+    /// @return The character as a Character object, or an empty List object if no input is available.
+    DatumPtr readChar();
+
+    /// @brief Return the contents of the current line history.
+    /// @return The line history as a List of RawLines.
+    QList<DatumPtr> recentHistory() const;
+
+    /// @brief Pass-through to the underlying QTextStream::seek()
+    /// @param loc The position to seek to.
+    /// @return True if the seek was successful, false otherwise.
+    bool seek(qint64 loc);
+
+    /// @brief Pass-through to the underlying QTextStream::pos()
+    /// @return The current position in the stream.
+    qint64 pos() const;
+
+    /// @brief Pass-through to the underlying QTextStream::atEnd()
+    /// @return True if the stream is at the end, false otherwise.
+    bool atEnd() const;
+
+    /// @brief Pass-through to the underlying QTextStream::flush()
+    void flush();
+
+    /// @brief Print a QString to the device
+    /// @param text The text to print.
+    void lprint(const QString &text);
+
+    /// @brief Return the underlying device (nullptr if there isn't a device).
+    /// @return The QIODevice.
+    QIODevice *device() const;
+
+    /// @brief Return the underlying string buffer (nullptr if there isn't one).
+    /// @return The string buffer.
+    QString *string() const;
+};
+
+#endif // READER_H

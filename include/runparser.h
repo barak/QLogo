@@ -19,22 +19,22 @@
 /// four words, `[PRINT 2 + 2]`. In QLogo a token is a word, list, or array.
 //===----------------------------------------------------------------------===//
 
-#include "datum.h"
-#include <QHash>
+#include "datum_types.h"
 
 class Procedures;
-class Kernel;
 class TextStream;
 
 class Runparser
 {
-    List *runparseRetval;
+    ListBuilder *runparseBuilder = nullptr;
     QString::iterator runparseCIter;
     QString::iterator runparseCEnd;
     bool isRunparseSourceSpecial;
-    void runparseSpecialchars(void);
-    void runparseMinus(void);
-    DatumPtr runparseNumber(void); // returns a number if successful
+    void runparseSpecialchars();
+    void runparseMinus();
+    DatumPtr tryParseNegativeNumber();
+    void parseUnaryMinus();
+    DatumPtr runparseNumber();
     void runparseQuotedWord();
     void runparseString();
 
@@ -52,6 +52,6 @@ class Runparser
 /// @returns A list of tokens.
 ///
 /// @note This function is a wrapper around the `Runparser` class.
-DatumPtr runparse(DatumPtr src);
+DatumPtr runparse(const DatumPtr &src);
 
 #endif // RUNPARSER_H

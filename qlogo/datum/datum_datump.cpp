@@ -16,18 +16,25 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "datum.h"
+#include "astnode.h"
+#include "datum_types.h"
+#include "workspace/procedures.h"
 #include <QObject>
 #include <qdebug.h>
 
-DatumPtr::DatumPtr() : d(&notADatum)
+bool isNotPersistent(Datum *d)
+{
+    return (d != nullptr) && ((d->isa & Datum::typePersistentMask) == 0);
+}
+
+DatumPtr::DatumPtr() : d(Datum::notADatum())
 {
 }
 
-DatumPtr::DatumPtr(Datum *other)
+DatumPtr::DatumPtr(Datum *other) noexcept
 {
     d = other;
-    if (d)
+    if (isNotPersistent(d))
     {
         ++(d->retainCount);
     }
@@ -36,7 +43,7 @@ DatumPtr::DatumPtr(Datum *other)
 DatumPtr::DatumPtr(const DatumPtr &other) noexcept
 {
     d = other.d;
-    if (d)
+    if (isNotPersistent(d))
     {
         ++(d->retainCount);
     }
@@ -60,7 +67,7 @@ DatumPtr::DatumPtr(int n)
     ++(d->retainCount);
 }
 
-DatumPtr::DatumPtr(QString n, bool isVBarred)
+DatumPtr::DatumPtr(const QString &n, bool isVBarred)
 {
     d = new Word(n, isVBarred);
     ++(d->retainCount);
@@ -74,14 +81,14 @@ DatumPtr::DatumPtr(const char *n)
 
 void DatumPtr::destroy()
 {
-    if (d != &notADatum)
+    if (isNotPersistent(d))
     {
         --(d->retainCount);
         if (d->retainCount <= 0)
         {
             if (d->alertOnDelete)
             {
-                qDebug() << "DELETING: " << d << " " << d->showValue();
+                qDebug() << "DELETING: " << d << " " << d->toString(Datum::ToStringFlags_Show);
             }
             delete d;
         }
@@ -99,7 +106,7 @@ DatumPtr &DatumPtr::operator=(const DatumPtr &other) noexcept
     {
         destroy();
         d = other.d;
-        if (d)
+        if (isNotPersistent(d))
         {
             ++(d->retainCount);
         }
@@ -107,114 +114,70 @@ DatumPtr &DatumPtr::operator=(const DatumPtr &other) noexcept
     return *this;
 }
 
-DatumPtr &DatumPtr::operator=(DatumPtr *other) noexcept
-{
-    if (other != this)
-    {
-        destroy();
-        d = other->d;
-        ++(d->retainCount);
-    }
-    return *this;
-}
-
-bool DatumPtr::operator==(DatumPtr *other)
-{
-    return d == other->d;
-}
-
-bool DatumPtr::operator==(const DatumPtr &other)
+bool DatumPtr::operator==(const DatumPtr &other) const
 {
     return d == other.d;
 }
 
-bool DatumPtr::operator!=(DatumPtr *other)
-{
-    return d != other->d;
-}
-
-bool DatumPtr::operator!=(const DatumPtr &other)
+bool DatumPtr::operator!=(const DatumPtr &other) const
 {
     return d != other.d;
 }
 
-bool DatumPtr::isASTNode()
+Word *DatumPtr::wordValue() const
 {
-    return d->isa() == Datum::astnodeType;
+    Q_ASSERT(d->isa == Datum::typeWord);
+    return reinterpret_cast<Word *>(d);
 }
 
-bool DatumPtr::isList()
+List *DatumPtr::listValue() const
 {
-    return d->isa() == Datum::listType;
+    Q_ASSERT(d && (d->isa & Datum::typeList) != 0);
+    return reinterpret_cast<List *>(d);
 }
 
-bool DatumPtr::isArray()
+Array *DatumPtr::arrayValue() const
 {
-    return d->isa() == Datum::arrayType;
+    Q_ASSERT(d->isa == Datum::typeArray);
+    return reinterpret_cast<Array *>(d);
 }
 
-bool DatumPtr::isWord()
+FlowControl *DatumPtr::flowControlValue() const
 {
-    return d->isa() == Datum::wordType;
+    Q_ASSERT((d->isa & Datum::typeFlowControlMask) != 0);
+    return reinterpret_cast<FlowControl *>(d);
 }
 
-bool DatumPtr::isError()
+Procedure *DatumPtr::procedureValue() const
 {
-    return d->isa() == Datum::errorType;
+    Q_ASSERT(d->isa == Datum::typeProcedure);
+    return reinterpret_cast<Procedure *>(d);
 }
 
-bool DatumPtr::isNothing()
+ASTNode *DatumPtr::astnodeValue() const
 {
-    return d->isa() == Datum::noType;
+    Q_ASSERT(d->isa == Datum::typeASTNode);
+    return reinterpret_cast<ASTNode *>(d);
 }
 
-Word *DatumPtr::wordValue()
+FCError *DatumPtr::errValue() const
 {
-    Q_ASSERT(d->isa() == Datum::wordType);
-    return (Word *)d;
+    Q_ASSERT(d->isa == Datum::typeError);
+    return reinterpret_cast<FCError *>(d);
 }
 
-List *DatumPtr::listValue()
+QString DatumPtr::toString(Datum::ToStringFlags flags,
+                           int printDepthLimit,
+                           int printWidthLimit,
+                           VisitedSet *visited) const
 {
-    Q_ASSERT(d->isa() == Datum::listType);
-    return (List *)d;
+    return d->toString(flags, printDepthLimit, printWidthLimit, visited);
 }
 
-Array *DatumPtr::arrayValue()
+// Value to represent nothing (similar to nullptr)
+// Use function-local static to avoid exceptions during global static initialization
+const DatumPtr &nothing()
 {
-    Q_ASSERT(d->isa() == Datum::arrayType);
-    return (Array *)d;
-}
-
-Procedure *DatumPtr::procedureValue()
-{
-    Q_ASSERT(d->isa() == Datum::procedureType);
-    return (Procedure *)d;
-}
-
-ASTNode *DatumPtr::astnodeValue()
-{
-    Q_ASSERT(d->isa() == Datum::astnodeType);
-    return (ASTNode *)d;
-}
-
-Error *DatumPtr::errorValue()
-{
-    Q_ASSERT(d->isa() == Datum::errorType);
-    return (Error *)d;
-}
-
-Datum::DatumType DatumPtr::isa()
-{
-    return d->isa();
-}
-
-QString DatumPtr::printValue(bool fullPrintp, int printDepthLimit, int printWidthLimit)
-{
-    return d->printValue(fullPrintp, printDepthLimit, printWidthLimit);
-}
-
-QString DatumPtr::showValue(bool fullPrintp, int printDepthLimit, int printWidthLimit)
-{
-    return d->showValue(fullPrintp, printDepthLimit, printWidthLimit);
+    static const DatumPtr instance(Datum::notADatum());
+    return instance;
 }

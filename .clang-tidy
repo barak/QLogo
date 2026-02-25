@@ -1,0 +1,101 @@
+---
+# Clang-tidy configuration for QLogo project
+# Run with: scripts/run-clang-tools.sh
+
+Checks: >
+  # Bug-prone patterns
+  bugprone-use-after-move,
+  bugprone-dangling-handle,
+  bugprone-integer-division,
+  bugprone-misplaced-widget-in-parent,
+  bugprone-reserved-identifier,
+  bugprone-string-integer-assignment,
+  bugprone-unused-raii,
+  bugprone-unused-return-value,
+  
+  # Performance patterns
+  performance-for-range-copy,
+  performance-unnecessary-copy-initialization,
+  performance-move-const-arg,
+  performance-unnecessary-value-param,
+  
+  # Static analysis (can be slow)
+  clang-analyzer-core.NullDereference,
+  clang-analyzer-core.UndefinedBinaryOperatorResult,
+  clang-analyzer-cplusplus.NewDelete,
+  clang-analyzer-cplusplus.NewDeleteLeaks,
+  
+  # CERT secure coding guidelines
+  cert-err33-c,
+  cert-err58-cpp,
+  cert-oop54-cpp,
+  -cert-err61-cpp,  # Disabled because pointers are a core part of the language
+  
+  # C++ Core Guidelines
+  cppcoreguidelines-owning-memory,
+  cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  cppcoreguidelines-pro-type-const-cast,
+  -cppcoreguidelines-pro-type-reinterpret-cast,  # Disabled because it causes false positives
+
+  cppcoreguidelines-slicing,
+  
+  # Additional bug-prone checks
+  bugprone-easily-swappable-parameters,
+  bugprone-exception-escape,
+  bugprone-macro-parentheses,
+  bugprone-multiple-statement-macro,
+  bugprone-no-escape-in-virtual-function,
+  bugprone-parent-virtual-call,
+  bugprone-posix-return,
+  bugprone-sizeof-container,
+  bugprone-sizeof-expression,
+  bugprone-suspicious-enum-usage,
+  bugprone-suspicious-missing-comma,
+  bugprone-suspicious-semicolon,
+  bugprone-swapped-arguments,
+  bugprone-terminating-continue,
+  bugprone-throw-keyword-missing,
+  bugprone-too-small-loop-variable,
+  bugprone-undefined-memory-manipulation,
+  bugprone-unhandled-self-assignment,
+  
+  # Performance checks
+  performance-faster-string-find,
+  performance-implicit-conversion-in-loop,
+  performance-inefficient-algorithm,
+  performance-inefficient-string-concatenation,
+  performance-inefficient-vector-operation,
+  performance-move-constructor-init,
+  performance-no-automatic-move,
+  performance-noexcept-move-constructor,
+  performance-trivially-destructible,
+  performance-type-promotion-in-math-fn,
+  performance-unnecessary-operator-params,
+
+
+  modernize-use-auto,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-equals-default,
+  modernize-use-equals-delete,
+  modernize-use-default-member-init,
+  modernize-raw-string-literal,
+  modernize-avoid-c-arrays,
+  modernize-deprecated-headers,
+  modernize-loop-convert,
+  modernize-make-shared,
+  modernize-make-unique,
+  modernize-pass-by-value,
+  modernize-redundant-void-arg,
+  modernize-replace-auto-ptr,
+  modernize-replace-disallow-copy-and-assign-macro,
+  modernize-replace-random-shuffle,
+  modernize-return-braced-init-list,
+  modernize-shrink-to-fit,
+  modernize-unary-static-assert,
+  modernize-use-bool-literals,
+  modernize-use-emplace,
+  modernize-use-noexcept,
+  modernize-use-transparent-functors,
+  modernize-use-uncaught-exceptions,
+  

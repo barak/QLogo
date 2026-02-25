@@ -17,16 +17,23 @@
 ///
 //===----------------------------------------------------------------------===//
 
+#include <QByteArray>
 #include <QChar>
 #include <QColor>
+#include <QDataStream>
 #include <QDebug>
+#include <QIODevice>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
+constexpr double PI = 3.14159265358979323846;
 
 using message_t = quint8;
 
-class Turtle;
-class Kernel;
-class Procedures;
-class LogoController;
+class LogoInterface;
+class Compiler;
 
 enum messageCategory : message_t
 {
@@ -80,32 +87,34 @@ enum messageCategory : message_t
     C_CANVAS_SET_PENMODE,           // Set canvas pen mode
 };
 
-/// @brief The configuration for the QLogo-GUI/logo programs.
+/// @brief The configuration for the qlgog/Psychi programs.
 ///
 /// This class is a singleton that contains global parameters that may be used by
 /// either program.
 class Config
 {
   private:
-    Config()
-    {
-    }
-    Config(const Config &);
-    Config &operator=(const Config &);
     ~Config()
     {
-        Q_ASSERT(mTurtle == NULL);
-        Q_ASSERT(mKernel == NULL);
-        Q_ASSERT(mProcedures == NULL);
-        Q_ASSERT(mLogoController == NULL);
+        Q_ASSERT(mLogoInterface == nullptr);
     }
 
-    Turtle *mTurtle = NULL;
-    Kernel *mKernel = NULL;
-    Procedures *mProcedures = NULL;
-    LogoController *mLogoController = NULL;
+    LogoInterface *mLogoInterface = nullptr;
 
   public:
+    Config() = default;
+    Config(const Config &other) = delete;
+    Config(Config &&other) = delete;
+    Config &operator=(const Config &other) = delete;
+    Config &operator=(Config &&other) = delete;
+
+#ifdef DEBUG
+const bool debugBuild = true;
+#else
+const bool debugBuild = false;
+#endif
+    
+    
     /// @brief Get the singleton instance of the Config class.
     /// @return The singleton instance of the Config class.
     static Config &get()
@@ -140,61 +149,40 @@ class Config
     // The canvas size proportions for each mode. 0.0 means Canvas is
     // completely hidden. 0.8 means Canvas takes up 80% of available space (remaining
     // 20% belongs to the Console).
-    const float textScreenSize = 0.0;
-    const float fullScreenSize = 0.8;
-    const float splitScreenSize = 0.8;
+    const float textScreenSize = 0.0f;
+    const float fullScreenSize = 0.8f;
+    const float splitScreenSize = 0.8f;
     const float initScreenSize = textScreenSize;
 
-    Turtle *mainTurtle()
+    LogoInterface *mainInterface()
     {
-        Q_ASSERT(mTurtle != NULL);
-        return mTurtle;
+        Q_ASSERT(mLogoInterface != nullptr);
+        return mLogoInterface;
     }
 
-    Kernel *mainKernel()
+    void setMainLogoInterface(LogoInterface *aLogoInterface)
     {
-        Q_ASSERT(mKernel != NULL);
-        return mKernel;
+        Q_ASSERT((mLogoInterface == nullptr) || (aLogoInterface == nullptr));
+        mLogoInterface = aLogoInterface;
     }
 
-    Procedures *mainProcedures()
-    {
-        Q_ASSERT(mProcedures != NULL);
-        return mProcedures;
-    }
-
-    LogoController *mainController()
-    {
-        Q_ASSERT(mLogoController != NULL);
-        return mLogoController;
-    }
-
-    void setMainTurtle(Turtle *aTurtle)
-    {
-        Q_ASSERT((mTurtle == NULL) || (aTurtle == NULL));
-        mTurtle = aTurtle;
-    }
-
-    void setMainKernel(Kernel *aKernel)
-    {
-        Q_ASSERT((mKernel == NULL) || (aKernel == NULL));
-        mKernel = aKernel;
-    }
-
-    void setMainProcedures(Procedures *aProcedures)
-    {
-        Q_ASSERT((mProcedures == NULL) || (aProcedures == NULL));
-        mProcedures = aProcedures;
-    }
-
-    void setMainLogoController(LogoController *aLogoController)
-    {
-        Q_ASSERT((mLogoController == NULL) || (aLogoController == NULL));
-        mLogoController = aLogoController;
-    }
-
-    // Set to true iff qlogo is communicating with QLogo-GUI.
+    // Set to true iff qlogo is communicating with Psychi.
     bool hasGUI = false;
+
+    // Set to true iff compiler should show IR code.
+    bool showIR = false;
+
+    // Set to true iff compiler should show the CFG view.
+    bool showCFG = false;
+
+    // Set to true if Compiler should verify the generated functions.
+    // Use for development. Compiler may generate bad code in unreachable
+    // sections, i.e. when handling parsing errors.
+    // Default to true in debug build.
+    bool verifyIR = debugBuild;
+
+    // Set to true iff compiler should show the CFG view.
+    bool showCON = false;
 
     // ARGV initialization parameters
     QStringList ARGV;
@@ -239,20 +227,6 @@ enum TurtleModeEnum
     turtleWindow
 };
 
-enum SignalsEnum_t : int
-{
-    noSignal = 0,
-
-    /// CTRL-Backslash, kill logo [ THROW "SYSTEM ]
-    systemSignal,
-
-    /// CTRL-C, kill running script [ THROW "TOPLEVEL ]
-    toplevelSignal,
-
-    /// CTRL-Z, pause running script [ PAUSE ]
-    pauseSignal
-};
-
 enum ScreenModeEnum
 {
     /// @brief The initial screen mode, the Console takes all available space.
@@ -266,6 +240,62 @@ enum ScreenModeEnum
 
     /// @brief The split screen mode, the Canvas takes up 80% of available space.
     splitScreenMode
+};
+
+class QProcess;
+
+/// @brief Policy class for writing messages to a QProcess.
+///
+/// The process pointer must be set before using message<ProcessMessageWriter>.
+/// Include <QProcess> where implementing write().
+struct ProcessMessageWriter
+{
+    static QProcess *process;
+
+    static qint64 write(const QByteArray &buffer);
+};
+
+/// @brief Policy class for writing messages to stdout.
+struct StdoutMessageWriter
+{
+    static qint64 write(const QByteArray &buffer);
+};
+
+/// @brief Interface for sending messages between processes.
+///
+/// This template class is used to send messages between processes. It presents a
+/// QDataStream interface for "<<" stream operations and then the destructor will
+/// send the message using the writer policy's write method.
+///
+/// @tparam WriterPolicy A policy class with a static write() method that takes
+///                      a const QByteArray& and returns qint64.
+template <typename WriterPolicy>
+struct MessageTemplate
+{
+    MessageTemplate(message_t header) : bufferStream(&buffer, QIODevice::WriteOnly)
+    {
+        buffer.clear();
+        bufferStream << header;
+    }
+
+    ~MessageTemplate()
+    {
+        qint64 datalen = buffer.size();
+        buffer.prepend(reinterpret_cast<const char *>(&datalen), sizeof(qint64));
+        qint64 datawritten = WriterPolicy::write(buffer);
+        Q_ASSERT(datawritten == buffer.size());
+    }
+
+    template <class T>
+    MessageTemplate &operator<<(const T &x)
+    {
+        bufferStream << x;
+        return *this;
+    }
+
+  private:
+    QByteArray buffer;
+    QDataStream bufferStream;
 };
 
 #endif // CONSTANTS_H

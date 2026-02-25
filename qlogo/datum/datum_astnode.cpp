@@ -18,58 +18,45 @@
 #include "astnode.h"
 #include <qdebug.h>
 
-void ASTNode::addChild(DatumPtr aChild)
+void ASTNode::addChild(const DatumPtr &aChild)
 {
     children.push_back(aChild);
 }
 
-int ASTNode::countOfChildren()
+int ASTNode::countOfChildren() const
 {
     return (int)children.size();
 }
 
-DatumPtr ASTNode::childAtIndex(unsigned index)
+DatumPtr ASTNode::childAtIndex(unsigned index) const
 {
     return children.at(index);
 }
 
-ASTNode::ASTNode(DatumPtr aNodeName)
+ASTNode::ASTNode(const DatumPtr &aNodeName)
 {
+    isa = Datum::typeASTNode;
     children.clear();
     nodeName = aNodeName;
-    kernel = NULL;
 }
 
-ASTNode::ASTNode(QString aNodeName)
+ASTNode::ASTNode(const QString &aNodeName)
 {
+    isa = Datum::typeASTNode;
     children.clear();
     nodeName = DatumPtr(aNodeName);
-    kernel = NULL;
 }
 
-ASTNode::~ASTNode()
-{
-}
-
-Datum::DatumType ASTNode::isa()
-{
-    return astnodeType;
-}
+ASTNode::~ASTNode() = default;
 
 // For debugging. Parameters are ignored.
-QString ASTNode::printValue(bool, int, int)
+QString ASTNode::toString(ToStringFlags, int, int, VisitedSet *) const
 {
-    QString retval = QString("( %1").arg(nodeName.showValue());
+    QString retval = QString("( %1").arg(nodeName.toString());
     for (auto &iter : children)
     {
-        retval.append(QString(" %2").arg(iter.showValue()));
+        retval.append(QString(" %2").arg(iter.toString()));
     }
     retval.append(" )");
     return retval;
-}
-
-// For debugging. Parameters are ignored.
-QString ASTNode::showValue(bool, int, int)
-{
-    return printValue();
 }

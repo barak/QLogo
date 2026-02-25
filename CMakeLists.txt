@@ -1,11 +1,11 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.16)
 
-project(QLogo VERSION 0.961 LANGUAGES CXX)
+project(QLogo VERSION 0.961 LANGUAGES CXX C)
 
 include(GNUInstallDirs)
 
 set(QLOGO_BIN qlogo)
-set(QLOGO_GUI QLogo-GUI)
+set(QLOGO_GUI Psychi)
 set(QLOGO_HELP qlogo_help.db)
 set(QLOGO_LIB qlogo_library.db)
 
@@ -21,11 +21,13 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
+# Add debugging flags
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0")
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(QT NAMES Qt6 REQUIRED COMPONENTS Widgets Sql Svg)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Sql Svg)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Sql Svg)
 
 set(QLOGO_DATA_DIR "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATADIR}/${QLOGO_BIN}")
 set(QLOGO_HELP_DB "${QLOGO_DATA_DIR}/${QLOGO_HELP}")
@@ -41,17 +43,18 @@ file(COPY "share/${QLOGO_HELP}" "share/${QLOGO_LIB}"
     DESTINATION "${QLOGO_DATA_DIR}"
 )
 
-file(COPY "${CMAKE_SOURCE_DIR}/test"
+file(COPY "${CMAKE_SOURCE_DIR}/tests"
     DESTINATION "${CMAKE_BINARY_DIR}"
 )
 
 install(TARGETS "${QLOGO_GUI}" "${QLOGO_BIN}"
     BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    RESOURCE DESTINATION ${CMAKE_INSTALL_DATADIR}
 )
 
 install(DIRECTORY "${QLOGO_DATA_DIR}"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}" 
 )
 
 install(FILES "${QLOGO_GUI}.desktop"

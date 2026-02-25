@@ -59,17 +59,17 @@ class MainWindow : public QMainWindow
 
     windowMode_t windowMode;
     bool hasShownCanvas = false;
-    EditorWindow *editWindow = NULL;
+    EditorWindow *editWindow = nullptr;
 
     int startLogo();
-    void beginReadRawlineWithPrompt(const QString prompt);
+    void beginReadRawlineWithPrompt(const QString &prompt);
     void beginReadChar();
     void sendConsoleCursorPosition();
 
     void initialize();
     void introduceCanvas();
     void setSplitterforMode(ScreenModeEnum mode);
-    void openEditorWindow(const QString startingText);
+    void openEditorWindow(const QString &startingText);
 
     void sendCanvasImage();
     void sendCanvasSvg();
@@ -80,17 +80,17 @@ class MainWindow : public QMainWindow
     void processReadBuffer();
 
   protected:
-    void closeEvent(QCloseEvent *event);
+    void closeEvent(QCloseEvent *event) override;
     QString findQlogoExe();
 
   public:
     /// @brief Constructor.
     ///
     /// @param parent The Qt parent widget.
-    explicit MainWindow(QWidget *parent = 0);
+    explicit MainWindow(QWidget *parent = nullptr);
 
     /// @brief Destructor.
-    ~MainWindow();
+    ~MainWindow() override;
 
     /// @brief Show the main window.
     void show();
@@ -122,7 +122,7 @@ class MainWindow : public QMainWindow
     void splitterHasMovedSlot(int, int);
 
     /// @brief Handle the editing being ended.
-    void editingHasEndedSlot(QString text);
+    void editingHasEndedSlot(const QString &text);
 
     /// @brief Handle a mouse button being clicked.
     void mouseclickedSlot(QPointF QPointF, int buttonID);
