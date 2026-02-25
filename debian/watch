@@ -1,8 +1,4 @@
-version=4
-
-# Upstream uses multiple format for tags, need to deal. Examples:
-#   QLogo-v0.94alpha
-#   version_0.96
-#   v0.94alpha3
-
-https://github.com/jasonsikes/QLogo/tags .*/[a-z_-]+?@ANY_VERSION@@ARCHIVE_EXT@
+Version: 5
+Template: GitHub
+Owner: jasonsikes
+Project: QLogo

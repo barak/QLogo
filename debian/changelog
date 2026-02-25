@@ -1,3 +1,10 @@
+qlogo (0.961-2) UNRELEASED; urgency=medium
+
+  * Bump policy
+  * uscan v5 debian/watch file
+
+ -- Barak A. Pearlmutter <bap@debian.org>  Wed, 25 Feb 2026 12:45:34 +0000
+
 qlogo (0.961-1) unstable; urgency=medium
 
   * New upstream version
