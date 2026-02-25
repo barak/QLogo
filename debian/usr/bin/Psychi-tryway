@@ -1,6 +1,6 @@
 #! /bin/sh -f
 
-e=/usr/bin/QLogo-GUI
+e=/usr/bin/Psychi
 
 yes_way=false
 

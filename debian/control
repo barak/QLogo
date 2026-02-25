@@ -9,6 +9,7 @@ Build-Depends: debhelper-compat (= 13),
 	cmake,
 	qt6-base-dev, libqt6opengl6-dev,
 	qt6-svg-dev,
+	llvm-21-dev,
 
 Package: qlogo
 Architecture: any

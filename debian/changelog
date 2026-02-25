@@ -2,6 +2,11 @@ qlogo (0.961-2) UNRELEASED; urgency=medium
 
   * Bump policy
   * uscan v5 debian/watch file
+  * track upstream
+    - build dependency on llvm-XX-dev
+    - QLogo-GUI moved to Psychi
+    - README.md moved to README.org
+    - desktop file name change
 
  -- Barak A. Pearlmutter <bap@debian.org>  Wed, 25 Feb 2026 12:45:34 +0000
 
