@@ -10,7 +10,7 @@
 #                passed tests instead of failed tests.
 #
 # Run test(s) optionally using FILENAMES as input. Compare the output to the file
-# with the same filename except with the ".result" extension.
+# with the same filename except with the ".expected" extension.
 #
 # FILENAMES is the list of optional names of the logo script WITH the .lg extension.
 #
@@ -55,7 +55,31 @@ else
 fi
 
 logo_binary=qlogo
-logo_path="../../../qlogo/$logo_binary"
+logo_path=""
+for candidate in \
+    "../../../build/qlogo/$logo_binary" \
+    "../../$logo_binary" \
+    "../../../qlogo/$logo_binary" \
+    "$logo_binary"
+do
+    if [ -x "$candidate" ] 2>/dev/null; then
+        logo_path="$candidate"
+        break
+    fi
+done
+if [ -z "$logo_path" ] && command -v "$logo_binary" >/dev/null 2>&1; then
+    logo_path=$(command -v "$logo_binary")
+fi
+if [ -n "$logo_path" ]; then
+    case $logo_path in
+        /*) ;;
+        *)
+            logo_dir=$(dirname "$logo_path")
+            logo_base=$(basename "$logo_path")
+            logo_path=$(cd "$logo_dir" && pwd)/$logo_base
+            ;;
+    esac
+fi
 reported_tests=""
 
 exe_opts=""
@@ -68,7 +92,7 @@ run_test() {
     case $f in
         *.lg)
             echo $f
-            $logo_path $exe_opts < $f 2>&1 | diff "${f%.lg}.result" -
+            $logo_path $exe_opts < $f 2>&1 | diff "${f%.lg}.expected" -
             if [ $? -eq 1 ]
             then
                 if [ "$blacklisted" != true ] && [ "$stop_on_first_failure" = true ]; then
@@ -86,15 +110,11 @@ run_test() {
     esac
 }
 
-if [ ! -f "$logo_path" ]
+if [ -z "$logo_path" ]
 then
-    echo "Error: could not find '$logo_binary' in parent directory."
-    echo "There should be a logo executable or a symbolic link in my parent diectory."
+    echo "Error: could not find executable '$logo_binary'."
     exit 0
 fi
-
-# Maximum number of parallel processes
-max_jobs=8
 
 # Check if system has GNU date (supports %N for nanoseconds)
 has_gnu_date() {
@@ -117,63 +137,71 @@ else
     fi
     test_count=0
     
-    # Create temporary file for collecting test results
+    # Create temporary files for collecting test results and driving make.
     reported_test_file=$(mktemp /tmp/test_reported_XXXXXX)
-    
-    # Collect all .lg files first
-    test_files=""
-    for a in *.lg; do
-        test_files="$test_files $a"
-    done
-    
-    # Function to run a test in the background
-    run_test_parallel() {
-        f="$1"
-        case $f in
-            *.lg)
-                echo $f
-                # Run test in background
-                (
-                    $logo_path $exe_opts < $f 2>&1 | diff "${f%.lg}.result" -
-                    exit_code=$?
-                    # Report: (blacklisted and passed) or (not blacklisted and failed)
-                    if [ "$blacklisted" = true ] && [ $exit_code -eq 0 ]; then
-                        echo "$f" >> "$reported_test_file"
-                    elif [ "$blacklisted" != true ] && [ $exit_code -eq 1 ]; then
-                        echo "$f" >> "$reported_test_file"
-                    fi
-                ) &
-                ;;
-        esac
-    }
-    
-    # Run tests in parallel, limiting to max_jobs concurrent processes
-    job_pids=""
-    for a in $test_files; do
-        # Wait for a job slot if we've reached the limit
-        while true; do
-            n=0
-            for p in $job_pids; do
-                n=$((n + 1))
-            done
-            [ $n -lt $max_jobs ] && break
-            first_pid="${job_pids# }"
-            first_pid="${first_pid%% *}"
-            wait $first_pid 2>/dev/null
-            job_pids="${job_pids#$first_pid}"
-            job_pids="${job_pids# }"
+    test_makefile=$(mktemp /tmp/test_makefile_XXXXXX)
+
+    if ! command -v make >/dev/null 2>&1; then
+        echo "Error: make is required but was not found in PATH."
+        rm -f "$reported_test_file" "$test_makefile"
+        exit 1
+    fi
+
+    if ! make --version >/dev/null 2>&1 || ! make --version 2>&1 | grep -q "GNU Make"; then
+        echo "Error: GNU make is required but was not found."
+        rm -f "$reported_test_file" "$test_makefile"
+        exit 1
+    fi
+
+    # Generate a Makefile with one target per .lg file. Test targets use a
+    # run- prefix so they do not collide with the .lg source files on disk.
+    {
+        echo "LOGO = $logo_path"
+        if [ -n "$exe_opts" ]; then
+            echo "EXE_OPTS = $exe_opts"
+        else
+            echo "EXE_OPTS ="
+        fi
+        echo "REPORT = $reported_test_file"
+        echo "BLACKLISTED = $blacklisted"
+        echo
+        echo ".PHONY: all"
+        printf "all:"
+        for a in *.lg; do
+            [ -f "$a" ] || continue
+            printf " run-%s" "$a"
+            test_count=$((test_count + 1))
         done
-        
-        run_test_parallel $a
-        job_pids="$job_pids $!"
-        test_count=$((test_count + 1))
-    done
-    
-    # Wait for all remaining jobs to complete
-    for pid in $job_pids; do
-        wait $pid 2>/dev/null
-    done
-    
+        echo
+        echo
+        cat <<'MAKEEOF'
+run-%.lg:
+	@echo "==== $(patsubst run-%,%,$@)"
+	@$(LOGO) $(EXE_OPTS) < $(patsubst run-%,%,$@) 2>&1 | diff "$(patsubst run-%.lg,%.expected,$@)" -; \
+	exit_code=$$?; \
+	if [ "$(BLACKLISTED)" = true ]; then \
+		if [ $$exit_code -eq 0 ]; then echo "$(patsubst run-%,%,$@)" >> $(REPORT); fi; \
+		exit 0; \
+	elif [ $$exit_code -eq 1 ]; then \
+		echo "$(patsubst run-%,%,$@)" >> $(REPORT); \
+		exit 1; \
+	else \
+		exit $$exit_code; \
+	fi
+MAKEEOF
+    } > "$test_makefile"
+
+    # Run all tests in parallel. Use -k unless -first is set (then stop after the
+    # first failure, once in-flight jobs finish).
+    make_opts="-j$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
+    if [ "$blacklisted" = true ] || [ "$stop_on_first_failure" != true ]; then
+        make_opts="$make_opts -k"
+    fi
+    # shellcheck disable=SC2086
+    make -f "$test_makefile" $make_opts all
+
+    rm -f "$test_makefile"
+
     # Read test results from the temporary file
     if [ -f "$reported_test_file" ] && [ -s "$reported_test_file" ]; then
         reported_tests=$(cat "$reported_test_file")

@@ -18,9 +18,6 @@
 #include "datum_core.h"
 #include "sharedconstants.h"
 #include <QObject>
-#include <algorithm>
-#include <qdebug.h>
-#include <unistd.h>
 
 /// @brief The number of Datum objects in use.
 int countOfNodes = 0;
@@ -31,8 +28,8 @@ Datum::Datum()
 {
     ++countOfNodes;
     maxCountOfNodes = std::max(maxCountOfNodes, countOfNodes);
-    if (Config::get().showCON)
-        qDebug() << this << " con++: " << countOfNodes;
+    if (Config::get().showCON_)
+        qInfo() << this << " con++: " << countOfNodes;
 }
 
 Datum *Datum::notADatum()
@@ -44,8 +41,8 @@ Datum *Datum::notADatum()
 Datum::~Datum()
 {
     --countOfNodes;
-    if (Config::get().showCON)
-        qDebug() << this << " --con: " << countOfNodes;
+    if (Config::get().showCON_)
+        qInfo() << this << " --con: " << countOfNodes;
 }
 
 QString Datum::toString(ToStringFlags flags, int printDepthLimit, int printWidthLimit, VisitedSet *visited) const

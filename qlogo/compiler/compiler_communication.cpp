@@ -14,7 +14,6 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "astnode.h"
 #include "compiler.h"
 #include "compiler_internal.h"
 #include "workspace/exports.h"
@@ -41,13 +40,12 @@ Value *Compiler::genPrint(const DatumPtr &node, RequestReturnType returnType)
 {
     Q_ASSERT(returnType && RequestReturnNothing);
 
-    AllocaInst *ary = generateChildrenAlloca(node.astnodeValue(), RequestReturnDatum, "printAry");
+    AllocaInst *ary = generateChildrenAlloca(node.astnodeValue(), RequestReturnDatum, DBG_NAME("printAry"));
     Value *useShow = CoBool(false);
     Value *addNewline = CoBool(true);
 
-    generateCallExtern(
-        TyAddr, stdWriteDatumAry, PaAddr(ary), PaInt32(ary->getArraySize()), PaBool(useShow), PaBool(addNewline));
-    return generateVoidRetval(node);
+    return generateCallExtern(
+        stdWriteDatumAry, PaAddr(scaff_->evaluator_), PaAddr(CoAddr(node.astnodeValue())), PaAddr(ary), PaInt32(ary->getArraySize()), PaBool(useShow), PaBool(addNewline));
 }
 
 /***DOC SHOW
@@ -64,13 +62,12 @@ Value *Compiler::genShow(const DatumPtr &node, RequestReturnType returnType)
 {
     Q_ASSERT(returnType && RequestReturnNothing);
 
-    AllocaInst *ary = generateChildrenAlloca(node.astnodeValue(), RequestReturnDatum, "showAry");
+    AllocaInst *ary = generateChildrenAlloca(node.astnodeValue(), RequestReturnDatum, DBG_NAME("showAry"));
     Value *useShow = CoBool(true);
     Value *addNewline = CoBool(true);
 
-    generateCallExtern(
-        TyAddr, stdWriteDatumAry, PaAddr(ary), PaInt32(ary->getArraySize()), PaBool(useShow), PaBool(addNewline));
-    return generateVoidRetval(node);
+    return generateCallExtern(
+        stdWriteDatumAry, PaAddr(scaff_->evaluator_), PaAddr(CoAddr(node.astnodeValue())), PaAddr(ary), PaInt32(ary->getArraySize()), PaBool(useShow), PaBool(addNewline));
 }
 
 /***DOC TYPE
@@ -100,11 +97,10 @@ Value *Compiler::genType(const DatumPtr &node, RequestReturnType returnType)
 {
     Q_ASSERT(returnType && RequestReturnNothing);
 
-    AllocaInst *ary = generateChildrenAlloca(node.astnodeValue(), RequestReturnDatum, "typeAry");
+    AllocaInst *ary = generateChildrenAlloca(node.astnodeValue(), RequestReturnDatum, DBG_NAME("typeAry"));
     Value *useShow = CoBool(false);
     Value *addNewline = CoBool(false);
 
-    generateCallExtern(
-        TyAddr, stdWriteDatumAry, PaAddr(ary), PaInt32(ary->getArraySize()), PaBool(useShow), PaBool(addNewline));
-    return generateVoidRetval(node);
+    return generateCallExtern(
+        stdWriteDatumAry, PaAddr(scaff_->evaluator_), PaAddr(CoAddr(node.astnodeValue())), PaAddr(ary), PaInt32(ary->getArraySize()), PaBool(useShow), PaBool(addNewline));
 }

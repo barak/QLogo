@@ -1,4 +1,3 @@
-
 //===-- qlogo/logointerface.h - LogoInterface class definition -------*- C++ -*-===//
 //
 // Copyright 2017-2024 Jason Sikes
@@ -16,13 +15,21 @@
 //===----------------------------------------------------------------------===//
 
 #include "interface/logointerface.h"
+#include "interface/pipeio.h"
 #include "workspace/kernel.h"
-#include <QApplication>
+#include <QCoreApplication>
 #include <QFile>
 #include <QIODevice>
+#include <cstdio>
 #include <csignal>
 
-volatile SignalsEnum_t LogoInterface::lastSignal = noSignal;
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
+volatile SignalsEnum_t LogoInterface::lastSignal_ = noSignal;
 
 /// @brief Handles a signal.
 /// @param sig The signal to handle.
@@ -33,144 +40,133 @@ static void handle_signal(int sig)
     switch (sig)
     {
     case SIGINT:
-        LogoInterface::lastSignal = toplevelSignal; // Ctrl+C
+        LogoInterface::lastSignal_ = toplevelSignal; // Ctrl+C
         break;
+#ifndef _WIN32
     case SIGTSTP:
-        LogoInterface::lastSignal = pauseSignal; // Ctrl+Z
+        LogoInterface::lastSignal_ = pauseSignal; // Ctrl+Z
         break;
     case SIGQUIT:
-        LogoInterface::lastSignal = systemSignal; // Ctrl+[backslash]
+        LogoInterface::lastSignal_ = systemSignal; // Ctrl+[backslash]
         break;
+#endif
     default:
         qWarning() << "Not expecting signal: " << sig;
     }
 }
 
-#ifdef _WIN32
-
 void LogoInterface::initSignals()
 {
-    // TODO: I need to find out how to handle keyboard interrupts in Windows
-}
-
-void LogoInterface::restoreSignals()
-{
-}
-
-#else
-
-void LogoInterface::initSignals()
-{
-    signal(SIGINT, handle_signal);  // TOPLEVEL
+    signal(SIGINT, handle_signal); // TOPLEVEL
+#ifndef _WIN32
     signal(SIGTSTP, handle_signal); // PAUSE
     signal(SIGQUIT, handle_signal); // SYSTEM
+#endif
 }
 
 void LogoInterface::restoreSignals()
 {
     signal(SIGINT, SIG_DFL);
+#ifndef _WIN32
     signal(SIGTSTP, SIG_DFL);
     signal(SIGQUIT, SIG_DFL);
+#endif
 }
 
-#endif
-
 LogoInterface::LogoInterface(QObject *parent)
-    : inStream(stdin, QIODevice::ReadOnly),
-      outStream(stdout, QIODevice::WriteOnly)
 {
-    dribbleStream = nullptr;
     Config::get().setMainLogoInterface(this);
 }
 
 LogoInterface::~LogoInterface()
 {
-    setDribble("");
     Config::get().setMainLogoInterface(nullptr);
 }
 
 void LogoInterface::printToConsole(const QString &s)
 {
-    outStream << s;
-    if (dribbleStream)
-        *dribbleStream << s;
+    const QByteArray utf8 = s.toUtf8();
+    fwrite(utf8.constData(), 1, static_cast<size_t>(utf8.size()), stdout);
+    fflush(stdout);
 }
 
 bool LogoInterface::atEnd()
 {
-    return inStream.atEnd();
+    return inputAtEof_ || feof(stdin) != 0;
 }
 
 bool LogoInterface::keyQueueHasChars()
 {
-    return !inStream.atEnd();
+    return !atEnd();
 }
 
 // This is READRAWLINE
 QString LogoInterface::inputRawlineWithPrompt(const QString &prompt)
 {
-    QString retval;
-    if (!inStream.atEnd())
+    if (atEnd())
+        return {};
+
+    // feof() is only set after a failed read. For redirected stdin (console tests),
+    // peek first so we do not print a trailing prompt after the last script line.
+    // Interactive ttys still print the prompt before blocking on input.
+#ifdef _WIN32
+    const bool interactive = _isatty(stdinFd()) != 0;
+#else
+    const bool interactive = isatty(stdinFd()) != 0;
+#endif
+    if (!interactive)
     {
-        printToConsole(prompt);
-        outStream.flush();
-        retval = inStream.readLine();
-        if (dribbleStream)
-            *dribbleStream << retval << '\n';
+        const int ch = fgetc(stdin);
+        if (ch == EOF)
+        {
+            inputAtEof_ = true;
+            return {};
+        }
+        ungetc(ch, stdin);
     }
+
+    printToConsole(prompt);
+
+    char buffer[65536];
+    if (!fgets(buffer, sizeof(buffer), stdin))
+    {
+        inputAtEof_ = true;
+        return {};
+    }
+
+    QString retval = QString::fromLocal8Bit(buffer);
+    if (retval.endsWith(QLatin1Char('\n')))
+        retval.chop(1);
+    if (retval.endsWith(QLatin1Char('\r')))
+        retval.chop(1);
+
     return retval;
 }
 
 // This is READCHAR
 DatumPtr LogoInterface::readchar()
 {
-    QChar c;
-    outStream.flush();
-    if (inStream.atEnd())
+    fflush(stdout);
+    if (atEnd())
         return nothing();
-    inStream >> c;
-    QString retval = c;
-    DatumPtr retvalP = DatumPtr(retval);
-    return retvalP;
-}
 
-bool LogoInterface::setDribble(const QString &filePath)
-{
-    if (filePath == "")
+    const int ch = fgetc(stdin);
+    if (ch == EOF)
     {
-        if (dribbleStream)
-        {
-            QIODevice *file = dribbleStream->device();
-            dribbleStream->flush();
-            delete dribbleStream;
-            file->close();
-            delete file;
-        }
-        dribbleStream = nullptr;
-        return true;
+        inputAtEof_ = true;
+        return nothing();
     }
-    auto *file = new QFile(filePath);
-    if (!file->open(QIODevice::Append))
-        return false;
-
-    dribbleStream = new QTextStream(file);
-    return true;
-}
-
-bool LogoInterface::isDribbling()
-{
-    return dribbleStream != nullptr;
+    return DatumPtr(QString(QChar(ch)));
 }
 
 SignalsEnum_t LogoInterface::latestSignal()
 {
-    SignalsEnum_t retval = lastSignal;
-    lastSignal = noSignal;
+    SignalsEnum_t retval = lastSignal_;
+    lastSignal_ = noSignal;
     return retval;
 }
 
 
 void LogoInterface::closeInterface()
 {
-    setDribble("");
 }

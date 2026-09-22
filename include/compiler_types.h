@@ -9,7 +9,7 @@
 #include "datum_ptr.h"
 #include <QList>
 
-// llvm #defines "emit". Qt uses "emit" as a function name.
+// Qt #defines "emit". llvm uses "emit" as a function name.
 #ifdef emit
 #undef emit
 #endif
@@ -18,7 +18,24 @@
 #include <llvm/IR/Value.h>
 
 typedef uint64_t *addr_t;
+
+#ifdef _MSC_VER
+class __single_inheritance Compiler;
+#else
 class Compiler;
+#endif
+
+
+/// @brief LLVM coroutine frame header (when using LLVM coro-split).
+///
+/// When the JIT uses LLVM's coroutine pass, the handle points to an
+/// LLVM-allocated frame whose first two words are resume and destroy.
+/// Use this to call resume/destroy; the rest of the frame is opaque.
+struct LLVMCoroFrameHeader
+{
+    void (*resume)(void *frame);
+    void (*destroy)(void *frame);
+};
 
 /// @brief Expression generator request type.
 ///
@@ -47,8 +64,9 @@ enum RequestReturnType : int
     RequestReturnRDBN = 0x0F,
 };
 
-// Compiled function signature
-typedef Datum *(*CompiledFunctionPtr)(addr_t, int32_t);
+// Compiled function signature: returns coroutine handle (nullptr = completed).
+// Fourth arg: resume handle; nullptr = initial call (use blockId), non-null = resume from that state.
+typedef LLVMCoroFrameHeader *(*CompiledFunctionPtr)(addr_t, addr_t, int32_t, LLVMCoroFrameHeader *);
 
 /// Signature of method that generates IR code for a given node.
 typedef llvm::Value *(Compiler::*Generator)(const DatumPtr &, RequestReturnType);
@@ -56,15 +74,15 @@ typedef llvm::Value *(Compiler::*Generator)(const DatumPtr &, RequestReturnType)
 // The information to store the generated function and to destroy later
 struct CompiledText
 {
-    llvm::orc::ResourceTrackerSP rt;
+    llvm::orc::ResourceTrackerSP rt_;
 
-    CompiledFunctionPtr functionPtr = nullptr;
+    CompiledFunctionPtr functionPtr_ = nullptr;
 
     // The AST list from which the compiled function was generated.
     // This is stored to ensure the AST nodes are kept alive as long as the compiled text exists.
-    QList<QList<DatumPtr>> astList;
+    QList<QList<DatumPtr>> astList_;
 
-    Compiler *compiler = nullptr;
+    Compiler *compiler_ = nullptr;
 
     ~CompiledText();
 };

@@ -1,0 +1,7 @@
+to proc
+goto "t1
+print [this shouldn't print]
+print [a] tag "t1 print [this should print]
+end
+proc
+proc

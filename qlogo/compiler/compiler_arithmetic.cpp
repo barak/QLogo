@@ -20,6 +20,7 @@
 #include "datum_types.h"
 #include "workspace/exports.h"
 #include "sharedconstants.h"
+#include "workspace/kernel.h"
 #include "workspace/callframe.h"
 
 using namespace llvm;
@@ -29,11 +30,11 @@ Value *Compiler::generateInt32FromDouble(ASTNode *parent, Value *src, bool isSig
 {
     Value *retval = nullptr;
     auto validator = [this, isSigned, &retval](Value *candidate) {
-        retval = isSigned ? scaff->builder.CreateFPToSI(candidate, TyInt32, "FpToInt")
-                          : scaff->builder.CreateFPToUI(candidate, TyInt32, "FpToInt");
-        Value *retvalCheck = isSigned ? scaff->builder.CreateSIToFP(retval, TyDouble, "FpToIntCheck")
-                                      : scaff->builder.CreateUIToFP(retval, TyDouble, "FpToIntCheck");
-        return scaff->builder.CreateFCmpOEQ(candidate, retvalCheck, "isValidTest");
+        retval = isSigned ? scaff_->builder_.CreateFPToSI(candidate, TyInt32, DBG_NAME("FpToInt"))
+                          : scaff_->builder_.CreateFPToUI(candidate, TyInt32, DBG_NAME("FpToInt"));
+        Value *retvalCheck = isSigned ? scaff_->builder_.CreateSIToFP(retval, TyDouble, DBG_NAME("FpToIntCheck"))
+                                      : scaff_->builder_.CreateUIToFP(retval, TyDouble, DBG_NAME("FpToIntCheck"));
+        return scaff_->builder_.CreateFCmpOEQ(candidate, retvalCheck, DBG_NAME("isValidTest"));
     };
     generateValidationDouble(parent, src, validator);
     return retval;
@@ -43,23 +44,22 @@ Value *Compiler::generateNotNegativeInt32FromDouble(ASTNode *parent, Value *src)
 {
     Value *retvalInt = nullptr;
     auto validator = [this, &retvalInt](Value *candidate) {
-        BasicBlock *intTestBB = scaff->builder.GetInsertBlock();
-        Function *theFunction = intTestBB->getParent();
+        BasicBlock *intTestBB = scaff_->builder_.GetInsertBlock();
 
-        BasicBlock *zeroTestBB = BasicBlock::Create(*scaff->theContext, "zeroTestBB", theFunction);
-        BasicBlock *resumeBB = BasicBlock::Create(*scaff->theContext, "resumeBB", theFunction);
+        BasicBlock *zeroTestBB = scaff_->createBasicBlock(DBG_NAME("zeroTestBB"));
+        BasicBlock *resumeBB = scaff_->createBasicBlock(DBG_NAME("resumeBB"));
 
-        retvalInt = scaff->builder.CreateFPToSI(candidate, TyInt32, "FpToInt");
-        Value *retvalIntCheck = scaff->builder.CreateSIToFP(retvalInt, TyDouble, "FpToIntCheck");
-        Value *isIntCond = scaff->builder.CreateFCmpOEQ(candidate, retvalIntCheck, "isIntCond");
-        scaff->builder.CreateCondBr(isIntCond, zeroTestBB, resumeBB);
+        retvalInt = scaff_->builder_.CreateFPToSI(candidate, TyInt32, DBG_NAME("FpToInt"));
+        Value *retvalIntCheck = scaff_->builder_.CreateSIToFP(retvalInt, TyDouble, DBG_NAME("FpToIntCheck"));
+        Value *isIntCond = scaff_->builder_.CreateFCmpOEQ(candidate, retvalIntCheck, DBG_NAME("isIntCond"));
+        scaff_->builder_.CreateCondBr(isIntCond, zeroTestBB, resumeBB);
 
-        scaff->builder.SetInsertPoint(zeroTestBB);
-        Value *isZeroCond = scaff->builder.CreateICmpSGE(retvalInt, CoInt32(0), "isZeroCond");
-        scaff->builder.CreateBr(resumeBB);
+        scaff_->builder_.SetInsertPoint(zeroTestBB);
+        Value *isZeroCond = scaff_->builder_.CreateICmpSGE(retvalInt, CoInt32(0), DBG_NAME("isZeroCond"));
+        scaff_->builder_.CreateBr(resumeBB);
 
-        scaff->builder.SetInsertPoint(resumeBB);
-        PHINode *retval = scaff->builder.CreatePHI(isIntCond->getType(), 2, "retval");
+        scaff_->builder_.SetInsertPoint(resumeBB);
+        PHINode *retval = scaff_->builder_.CreatePHI(isIntCond->getType(), 2, DBG_NAME("retval"));
         retval->addIncoming(isIntCond, intTestBB);
         retval->addIncoming(isZeroCond, zeroTestBB);
         return retval;
@@ -72,23 +72,22 @@ Value *Compiler::generateNotZeroInt32FromDouble(ASTNode *parent, Value *src)
 {
     Value *retvalInt = nullptr;
     auto validator = [this, &retvalInt](Value *candidate) {
-        BasicBlock *intTestBB = scaff->builder.GetInsertBlock();
-        Function *theFunction = intTestBB->getParent();
+        BasicBlock *intTestBB = scaff_->builder_.GetInsertBlock();
 
-        BasicBlock *zeroTestBB = BasicBlock::Create(*scaff->theContext, "zeroTestBB", theFunction);
-        BasicBlock *resumeBB = BasicBlock::Create(*scaff->theContext, "resumeBB", theFunction);
+        BasicBlock *zeroTestBB = scaff_->createBasicBlock(DBG_NAME("zeroTestBB"));
+        BasicBlock *resumeBB = scaff_->createBasicBlock(DBG_NAME("resumeBB"));
 
-        retvalInt = scaff->builder.CreateFPToSI(candidate, TyInt32, "FpToInt");
-        Value *retvalIntCheck = scaff->builder.CreateSIToFP(retvalInt, TyDouble, "FpToIntCheck");
-        Value *isIntCond = scaff->builder.CreateFCmpOEQ(candidate, retvalIntCheck, "isIntCond");
-        scaff->builder.CreateCondBr(isIntCond, zeroTestBB, resumeBB);
+        retvalInt = scaff_->builder_.CreateFPToSI(candidate, TyInt32, DBG_NAME("FpToInt"));
+        Value *retvalIntCheck = scaff_->builder_.CreateSIToFP(retvalInt, TyDouble, DBG_NAME("FpToIntCheck"));
+        Value *isIntCond = scaff_->builder_.CreateFCmpOEQ(candidate, retvalIntCheck, DBG_NAME("isIntCond"));
+        scaff_->builder_.CreateCondBr(isIntCond, zeroTestBB, resumeBB);
 
-        scaff->builder.SetInsertPoint(zeroTestBB);
-        Value *isZeroCond = scaff->builder.CreateICmpNE(retvalInt, CoInt32(0), "isZeroCond");
-        scaff->builder.CreateBr(resumeBB);
+        scaff_->builder_.SetInsertPoint(zeroTestBB);
+        Value *isZeroCond = scaff_->builder_.CreateICmpNE(retvalInt, CoInt32(0), DBG_NAME("isZeroCond"));
+        scaff_->builder_.CreateBr(resumeBB);
 
-        scaff->builder.SetInsertPoint(resumeBB);
-        PHINode *retval = scaff->builder.CreatePHI(isIntCond->getType(), 2, "retval");
+        scaff_->builder_.SetInsertPoint(resumeBB);
+        PHINode *retval = scaff_->builder_.CreatePHI(isIntCond->getType(), 2, DBG_NAME("retval"));
         retval->addIncoming(isIntCond, intTestBB);
         retval->addIncoming(isZeroCond, zeroTestBB);
         return retval;
@@ -100,19 +99,19 @@ Value *Compiler::generateNotZeroInt32FromDouble(ASTNode *parent, Value *src)
 Value *Compiler::generateNotZeroFromDouble(ASTNode *parent, Value *src)
 {
     return generateValidationDouble(
-        parent, src, [this](Value *val) { return scaff->builder.CreateFCmpONE(val, CoDouble(0.0), "isZeroTest"); });
+        parent, src, [this](Value *val) { return scaff_->builder_.CreateFCmpONE(val, CoDouble(0.0), DBG_NAME("isZeroTest")); });
 }
 
 Value *Compiler::generateNotNegativeFromDouble(ASTNode *parent, Value *src)
 {
     return generateValidationDouble(
-        parent, src, [this](Value *val) { return scaff->builder.CreateFCmpOGE(val, CoDouble(0.0), "isZeroTest"); });
+        parent, src, [this](Value *val) { return scaff_->builder_.CreateFCmpOGE(val, CoDouble(0.0), DBG_NAME("isZeroTest")); });
 }
 
 Value *Compiler::generateGTZeroFromDouble(ASTNode *parent, Value *src)
 {
     return generateValidationDouble(
-        parent, src, [this](Value *val) { return scaff->builder.CreateFCmpOGT(val, CoDouble(0.0), "isZeroTest"); });
+        parent, src, [this](Value *val) { return scaff_->builder_.CreateFCmpOGT(val, CoDouble(0.0), DBG_NAME("isZeroTest")); });
 }
 
 /***DOC ARCTAN
@@ -136,13 +135,13 @@ Value *Compiler::genArctan(const DatumPtr &node, RequestReturnType returnType)
     // Calculate atan() or atan2() depending on number of children.
     if (children.size() == 1)
     {
-        retval = generateCallExtern(TyDouble, atan, PaDouble(children[0]));
+        retval = generateCallExternTyped(static_cast<double (*)(double)>(atan), "atan", {PaDouble(children[0])});
     }
     else
     {
-        retval = generateCallExtern(TyDouble, atan2, PaDouble(children[1]), PaDouble(children[0]));
+        retval = generateCallExternTyped(static_cast<double (*)(double, double)>(atan2), "atan2", {PaDouble(children[1]), PaDouble(children[0])});
     }
-    retval = scaff->builder.CreateFMul(retval, radToDeg, "theta");
+    retval = scaff_->builder_.CreateFMul(retval, radToDeg, DBG_NAME("theta"));
     return retval;
 }
 
@@ -163,31 +162,29 @@ Value *Compiler::genAshift(const DatumPtr &node, RequestReturnType returnType)
 
     num1 = generateInt32FromDouble(node.astnodeValue(), num1, true);
     num2 = generateInt32FromDouble(node.astnodeValue(), num2, true);
-    Value *retval = scaff->builder.CreateAlloca(TyInt32, CoInt32(1), "ashiftAlloca");
+    Value *retval = scaff_->builder_.CreateAlloca(TyInt32, CoInt32(1), DBG_NAME("ashiftAlloca"));
 
-    Function *theFunction = scaff->builder.GetInsertBlock()->getParent();
+    BasicBlock *leftShiftBB = scaff_->createBasicBlock(DBG_NAME("leftShiftBB"));
+    BasicBlock *rightShiftBB = scaff_->createBasicBlock(DBG_NAME("rightShiftBB"));
+    BasicBlock *mergeBB = scaff_->createBasicBlock(DBG_NAME("shiftCont"));
 
-    BasicBlock *leftShiftBB = BasicBlock::Create(*scaff->theContext, "leftShiftBB", theFunction);
-    BasicBlock *rightShiftBB = BasicBlock::Create(*scaff->theContext, "rightShiftBB", theFunction);
-    BasicBlock *mergeBB = BasicBlock::Create(*scaff->theContext, "shiftCont", theFunction);
+    Value *cond = scaff_->builder_.CreateICmpSGE(num2, CoInt32(0), DBG_NAME("isGE0"));
+    scaff_->builder_.CreateCondBr(cond, leftShiftBB, rightShiftBB);
 
-    Value *cond = scaff->builder.CreateICmpSGE(num2, CoInt32(0), "isGE0");
-    scaff->builder.CreateCondBr(cond, leftShiftBB, rightShiftBB);
+    scaff_->builder_.SetInsertPoint(leftShiftBB);
+    Value *lsResult = scaff_->builder_.CreateShl(num1, num2, DBG_NAME("leftShift"));
+    scaff_->builder_.CreateStore(lsResult, retval);
+    scaff_->builder_.CreateBr(mergeBB);
 
-    scaff->builder.SetInsertPoint(leftShiftBB);
-    Value *lsResult = scaff->builder.CreateShl(num1, num2, "leftShift");
-    scaff->builder.CreateStore(lsResult, retval);
-    scaff->builder.CreateBr(mergeBB);
+    scaff_->builder_.SetInsertPoint(rightShiftBB);
+    num2 = scaff_->builder_.CreateSub(CoInt32(0), num2, DBG_NAME("negNum2"));
+    Value *rsResult = scaff_->builder_.CreateAShr(num1, num2, DBG_NAME("rightShift"));
+    scaff_->builder_.CreateStore(rsResult, retval);
+    scaff_->builder_.CreateBr(mergeBB);
 
-    scaff->builder.SetInsertPoint(rightShiftBB);
-    num2 = scaff->builder.CreateSub(CoInt32(0), num2, "negNum2");
-    Value *rsResult = scaff->builder.CreateAShr(num1, num2, "rightShift");
-    scaff->builder.CreateStore(rsResult, retval);
-    scaff->builder.CreateBr(mergeBB);
-
-    scaff->builder.SetInsertPoint(mergeBB);
-    retval = scaff->builder.CreateLoad(TyInt32, retval, "loadResult");
-    return scaff->builder.CreateSIToFP(retval, TyDouble, "IntToFP");
+    scaff_->builder_.SetInsertPoint(mergeBB);
+    retval = scaff_->builder_.CreateLoad(TyInt32, retval, DBG_NAME("loadResult"));
+    return scaff_->builder_.CreateSIToFP(retval, TyDouble, DBG_NAME("IntToFP"));
 }
 
 /***DOC LSHIFT
@@ -207,31 +204,29 @@ Value *Compiler::genLshift(const DatumPtr &node, RequestReturnType returnType)
 
     num1 = generateInt32FromDouble(node.astnodeValue(), num1, true);
     num2 = generateInt32FromDouble(node.astnodeValue(), num2, true);
-    Value *retval = scaff->builder.CreateAlloca(TyInt32, CoInt32(1), "lshiftAlloca");
+    Value *retval = scaff_->builder_.CreateAlloca(TyInt32, CoInt32(1), DBG_NAME("lshiftAlloca"));
 
-    Function *theFunction = scaff->builder.GetInsertBlock()->getParent();
+    BasicBlock *leftShiftBB = scaff_->createBasicBlock(DBG_NAME("leftShiftBB"));
+    BasicBlock *rightShiftBB = scaff_->createBasicBlock(DBG_NAME("rightShiftBB"));
+    BasicBlock *mergeBB = scaff_->createBasicBlock(DBG_NAME("shiftCont"));
 
-    BasicBlock *leftShiftBB = BasicBlock::Create(*scaff->theContext, "leftShiftBB", theFunction);
-    BasicBlock *rightShiftBB = BasicBlock::Create(*scaff->theContext, "rightShiftBB", theFunction);
-    BasicBlock *mergeBB = BasicBlock::Create(*scaff->theContext, "shiftCont", theFunction);
+    Value *cond = scaff_->builder_.CreateICmpSGE(num2, CoInt32(0), DBG_NAME("isGE0"));
+    scaff_->builder_.CreateCondBr(cond, leftShiftBB, rightShiftBB);
 
-    Value *cond = scaff->builder.CreateICmpSGE(num2, CoInt32(0), "isGE0");
-    scaff->builder.CreateCondBr(cond, leftShiftBB, rightShiftBB);
+    scaff_->builder_.SetInsertPoint(leftShiftBB);
+    Value *lsResult = scaff_->builder_.CreateShl(num1, num2, DBG_NAME("leftShift"));
+    scaff_->builder_.CreateStore(lsResult, retval);
+    scaff_->builder_.CreateBr(mergeBB);
 
-    scaff->builder.SetInsertPoint(leftShiftBB);
-    Value *lsResult = scaff->builder.CreateShl(num1, num2, "leftShift");
-    scaff->builder.CreateStore(lsResult, retval);
-    scaff->builder.CreateBr(mergeBB);
+    scaff_->builder_.SetInsertPoint(rightShiftBB);
+    num2 = scaff_->builder_.CreateSub(CoInt32(0), num2, DBG_NAME("negNum2"));
+    Value *rsResult = scaff_->builder_.CreateLShr(num1, num2, DBG_NAME("rightShift"));
+    scaff_->builder_.CreateStore(rsResult, retval);
+    scaff_->builder_.CreateBr(mergeBB);
 
-    scaff->builder.SetInsertPoint(rightShiftBB);
-    num2 = scaff->builder.CreateSub(CoInt32(0), num2, "negNum2");
-    Value *rsResult = scaff->builder.CreateLShr(num1, num2, "rightShift");
-    scaff->builder.CreateStore(rsResult, retval);
-    scaff->builder.CreateBr(mergeBB);
-
-    scaff->builder.SetInsertPoint(mergeBB);
-    retval = scaff->builder.CreateLoad(TyInt32, retval, "loadResult");
-    return scaff->builder.CreateSIToFP(retval, TyDouble, "IntToFP");
+    scaff_->builder_.SetInsertPoint(mergeBB);
+    retval = scaff_->builder_.CreateLoad(TyInt32, retval, DBG_NAME("loadResult"));
+    return scaff_->builder_.CreateSIToFP(retval, TyDouble, DBG_NAME("IntToFP"));
 }
 
 /***DOC BITAND
@@ -261,9 +256,9 @@ Value *Compiler::genBitand(const DatumPtr &node, RequestReturnType returnType)
 
     for (auto &child : children)
     {
-        retval = scaff->builder.CreateAnd(retval, child, "BitAND");
+        retval = scaff_->builder_.CreateAnd(retval, child, DBG_NAME("BitAND"));
     }
-    return scaff->builder.CreateSIToFP(retval, TyDouble, "IntToFP");
+    return scaff_->builder_.CreateSIToFP(retval, TyDouble, DBG_NAME("IntToFP"));
 }
 
 /***DOC BITOR
@@ -293,9 +288,9 @@ Value *Compiler::genBitor(const DatumPtr &node, RequestReturnType returnType)
 
     for (auto &child : children)
     {
-        retval = scaff->builder.CreateOr(retval, child, "BitOR");
+        retval = scaff_->builder_.CreateOr(retval, child, DBG_NAME("BitOR"));
     }
-    return scaff->builder.CreateSIToFP(retval, TyDouble, "IntToFP");
+    return scaff_->builder_.CreateSIToFP(retval, TyDouble, DBG_NAME("IntToFP"));
 }
 
 /***DOC BITXOR
@@ -326,9 +321,9 @@ Value *Compiler::genBitxor(const DatumPtr &node, RequestReturnType returnType)
 
     for (int i = 1; i < children.size(); ++i)
     {
-        retval = scaff->builder.CreateXor(retval, children[i], "BitXOR");
+        retval = scaff_->builder_.CreateXor(retval, children[i], DBG_NAME("BitXOR"));
     }
-    return scaff->builder.CreateSIToFP(retval, TyDouble, "IntToFP");
+    return scaff_->builder_.CreateSIToFP(retval, TyDouble, DBG_NAME("IntToFP"));
 }
 
 /***DOC BITNOT
@@ -344,9 +339,9 @@ Value *Compiler::genBitnot(const DatumPtr &node, RequestReturnType returnType)
     Value *num = generateChild(node.astnodeValue(), 0, RequestReturnReal);
 
     num = generateInt32FromDouble(node.astnodeValue(), num, true);
-    num = scaff->builder.CreateXor(num, CoInt32(-1), "bitNOT");
+    num = scaff_->builder_.CreateXor(num, CoInt32(-1), DBG_NAME("bitNOT"));
 
-    return scaff->builder.CreateSIToFP(num, TyDouble, "IntToFP");
+    return scaff_->builder_.CreateSIToFP(num, TyDouble, DBG_NAME("IntToFP"));
 }
 
 /***DOC MODULO
@@ -366,39 +361,37 @@ Value *Compiler::genModulo(const DatumPtr &node, RequestReturnType returnType)
     num = generateInt32FromDouble(node.astnodeValue(), num, true);
     denom = generateNotZeroInt32FromDouble(node.astnodeValue(), denom);
 
-    Function *theFunction = scaff->builder.GetInsertBlock()->getParent();
+    Value *retvalLoc = scaff_->builder_.CreateAlloca(TyInt32, CoInt32(1), DBG_NAME("retvalLoc"));
 
-    Value *retvalLoc = scaff->builder.CreateAlloca(TyInt32, CoInt32(1), "retvalLoc");
+    BasicBlock *pos1BB = scaff_->createBasicBlock(DBG_NAME("pos1BB"));
+    BasicBlock *neg1BB = scaff_->createBasicBlock(DBG_NAME("neg1BB"));
+    BasicBlock *addbBB = scaff_->createBasicBlock(DBG_NAME("addbBB"));
+    BasicBlock *contBB = scaff_->createBasicBlock(DBG_NAME("contBB"));
 
-    BasicBlock *pos1BB = BasicBlock::Create(*scaff->theContext, "pos1BB", theFunction);
-    BasicBlock *neg1BB = BasicBlock::Create(*scaff->theContext, "neg1BB", theFunction);
-    BasicBlock *addbBB = BasicBlock::Create(*scaff->theContext, "addbBB", theFunction);
-    BasicBlock *contBB = BasicBlock::Create(*scaff->theContext, "contBB", theFunction);
+    Value *r = scaff_->builder_.CreateSRem(num, denom, DBG_NAME("remainder"));
+    scaff_->builder_.CreateStore(r, retvalLoc);
 
-    Value *r = scaff->builder.CreateSRem(num, denom, "remainder");
-    scaff->builder.CreateStore(r, retvalLoc);
+    Value *c1 = scaff_->builder_.CreateICmpSLT(r, CoInt32(0), DBG_NAME("cond1"));
+    scaff_->builder_.CreateCondBr(c1, neg1BB, pos1BB);
 
-    Value *c1 = scaff->builder.CreateICmpSLT(r, CoInt32(0), "cond1");
-    scaff->builder.CreateCondBr(c1, neg1BB, pos1BB);
+    scaff_->builder_.SetInsertPoint(pos1BB);
+    Value *c2 = scaff_->builder_.CreateICmpSLT(denom, CoInt32(0), DBG_NAME("cond2"));
+    scaff_->builder_.CreateCondBr(c2, addbBB, contBB);
 
-    scaff->builder.SetInsertPoint(pos1BB);
-    Value *c2 = scaff->builder.CreateICmpSLT(denom, CoInt32(0), "cond2");
-    scaff->builder.CreateCondBr(c2, addbBB, contBB);
+    scaff_->builder_.SetInsertPoint(neg1BB);
+    Value *c3 = scaff_->builder_.CreateICmpSLT(denom, CoInt32(0), DBG_NAME("cond3"));
+    scaff_->builder_.CreateCondBr(c3, contBB, addbBB);
 
-    scaff->builder.SetInsertPoint(neg1BB);
-    Value *c3 = scaff->builder.CreateICmpSLT(denom, CoInt32(0), "cond3");
-    scaff->builder.CreateCondBr(c3, contBB, addbBB);
+    scaff_->builder_.SetInsertPoint(addbBB);
+    Value *retvalRB = scaff_->builder_.CreateAdd(r, denom, DBG_NAME("addB"));
+    scaff_->builder_.CreateStore(retvalRB, retvalLoc);
+    scaff_->builder_.CreateBr(contBB);
 
-    scaff->builder.SetInsertPoint(addbBB);
-    Value *retvalRB = scaff->builder.CreateAdd(r, denom, "addB");
-    scaff->builder.CreateStore(retvalRB, retvalLoc);
-    scaff->builder.CreateBr(contBB);
-
-    scaff->builder.SetInsertPoint(contBB);
+    scaff_->builder_.SetInsertPoint(contBB);
 
     // TODO: Do we need load and store here?
-    r = scaff->builder.CreateLoad(TyInt32, retvalLoc);
-    return scaff->builder.CreateSIToFP(r, TyDouble, "IntToFP");
+    r = scaff_->builder_.CreateLoad(TyInt32, retvalLoc);
+    return scaff_->builder_.CreateSIToFP(r, TyDouble, DBG_NAME("IntToFP"));
 }
 
 /***DOC SQRT
@@ -414,7 +407,7 @@ Value *Compiler::genSqrt(const DatumPtr &node, RequestReturnType returnType)
     Value *num = generateChild(node.astnodeValue(), 0, RequestReturnReal);
 
     num = generateNotNegativeFromDouble(node.astnodeValue(), num);
-    return generateCallExtern(TyDouble, sqrt, PaDouble(num));
+    return generateCallExternTyped(static_cast<double (*)(double)>(sqrt), "sqrt", {PaDouble(num)});
 }
 
 /***DOC POWER
@@ -431,31 +424,31 @@ Value *Compiler::genPower(const DatumPtr &node, RequestReturnType returnType)
     Value *num1 = generateChild(node.astnodeValue(), 0, RequestReturnReal);
     Value *num2 = generateChild(node.astnodeValue(), 1, RequestReturnReal);
 
-    BasicBlock *startBB = scaff->builder.GetInsertBlock();
+    BasicBlock *startBB = scaff_->builder_.GetInsertBlock();
     Function *theFunction = startBB->getParent();
 
-    BasicBlock *isNegativeBB = BasicBlock::Create(*scaff->theContext, "isNegative", theFunction);
-    BasicBlock *notNegativeBB = BasicBlock::Create(*scaff->theContext, "notNegative");
+    BasicBlock *isNegativeBB = scaff_->createBasicBlock(DBG_NAME("isNegative"));
+    BasicBlock *notNegativeBB = BasicBlock::Create(*scaff_->theContext_, DBG_NAME("notNegative"));
 
-    Value *cond = scaff->builder.CreateFCmpOGE(num1, CoDouble(0.0), "isNegativeTest");
-    scaff->builder.CreateCondBr(cond, notNegativeBB, isNegativeBB);
+    Value *cond = scaff_->builder_.CreateFCmpOGE(num1, CoDouble(0.0), DBG_NAME("isNegativeTest"));
+    scaff_->builder_.CreateCondBr(cond, notNegativeBB, isNegativeBB);
 
-    scaff->builder.SetInsertPoint(isNegativeBB);
+    scaff_->builder_.SetInsertPoint(isNegativeBB);
     auto validator = [this](Value *candidate) {
-        Value *candidateInt = scaff->builder.CreateFPToSI(candidate, TyInt32, "FpToInt");
-        Value *candidateCheck = scaff->builder.CreateSIToFP(candidateInt, TyDouble, "FpToIntCheck");
-        return scaff->builder.CreateFCmpOEQ(candidate, candidateCheck, "isValidTest");
+        Value *candidateInt = scaff_->builder_.CreateFPToSI(candidate, TyInt32, DBG_NAME("FpToInt"));
+        Value *candidateCheck = scaff_->builder_.CreateSIToFP(candidateInt, TyDouble, DBG_NAME("FpToIntCheck"));
+        return scaff_->builder_.CreateFCmpOEQ(candidate, candidateCheck, DBG_NAME("isValidTest"));
     };
     Value *num2Int = generateValidationDouble(node.astnodeValue(), num2, validator);
-    BasicBlock *postNegativeBB = scaff->builder.GetInsertBlock();
-    scaff->builder.CreateBr(notNegativeBB);
+    BasicBlock *postNegativeBB = scaff_->builder_.GetInsertBlock();
+    scaff_->builder_.CreateBr(notNegativeBB);
 
     theFunction->insert(theFunction->end(), notNegativeBB);
-    scaff->builder.SetInsertPoint(notNegativeBB);
-    PHINode *num2Phi = scaff->builder.CreatePHI(TyDouble, 2, "num2Phi");
+    scaff_->builder_.SetInsertPoint(notNegativeBB);
+    PHINode *num2Phi = scaff_->builder_.CreatePHI(TyDouble, 2, DBG_NAME("num2Phi"));
     num2Phi->addIncoming(num2, startBB);
     num2Phi->addIncoming(num2Int, postNegativeBB);
-    return generateCallExtern(TyDouble, pow, PaDouble(num1), PaDouble(num2Phi));
+    return generateCallExternTyped(static_cast<double (*)(double, double)>(pow), "pow", {PaDouble(num1), PaDouble(num2Phi)});
 }
 
 /***DOC MINUS
@@ -478,7 +471,7 @@ Value *Compiler::genMinus(const DatumPtr &node, RequestReturnType returnType)
     Q_ASSERT(returnType && RequestReturnReal);
     Value *num = generateChild(node.astnodeValue(), 0, RequestReturnReal);
 
-    return scaff->builder.CreateFNeg(num, "negtmp");
+    return scaff_->builder_.CreateFNeg(num, DBG_NAME("negtmp"));
 }
 
 /***DOC PRODUCT
@@ -503,7 +496,7 @@ Value *Compiler::genProduct(const DatumPtr &node, RequestReturnType returnType)
     Value *accum = children[0];
     for (int i = 1; i < children.size(); ++i)
     {
-        accum = scaff->builder.CreateFMul(accum, children[i], "multmp");
+        accum = scaff_->builder_.CreateFMul(accum, children[i], DBG_NAME("multmp"));
     }
     return accum;
 }
@@ -530,7 +523,7 @@ Value *Compiler::genSum(const DatumPtr &node, RequestReturnType returnType)
     Value *accum = children[0];
     for (int i = 1; i < children.size(); ++i)
     {
-        accum = scaff->builder.CreateFAdd(accum, children[i], "addtmp");
+        accum = scaff_->builder_.CreateFAdd(accum, children[i], DBG_NAME("addtmp"));
     }
     return accum;
 }
@@ -552,7 +545,7 @@ Value *Compiler::genDifference(const DatumPtr &node, RequestReturnType returnTyp
     Value *num1 = generateChild(node.astnodeValue(), 0, RequestReturnReal);
     Value *num2 = generateChild(node.astnodeValue(), 1, RequestReturnReal);
 
-    return scaff->builder.CreateFSub(num1, num2, "subtmp");
+    return scaff_->builder_.CreateFSub(num1, num2, DBG_NAME("subtmp"));
 }
 
 /***DOC QUOTIENT
@@ -589,7 +582,7 @@ Value *Compiler::genQuotient(const DatumPtr &node, RequestReturnType returnType)
     }
 
     denom = generateNotZeroFromDouble(node.astnodeValue(), denom);
-    return scaff->builder.CreateFDiv(num, denom, "quotmp");
+    return scaff_->builder_.CreateFDiv(num, denom, DBG_NAME("quotmp"));
 }
 
 /***DOC REMAINDER
@@ -607,8 +600,8 @@ Value *Compiler::genRemainder(const DatumPtr &node, RequestReturnType returnType
     Value *denom = generateChild(node.astnodeValue(), 1, RequestReturnReal);
     num = generateInt32FromDouble(node.astnodeValue(), num, true);
     denom = generateNotZeroInt32FromDouble(node.astnodeValue(), denom);
-    Value *retval = scaff->builder.CreateSRem(num, denom, "remainder");
-    return scaff->builder.CreateSIToFP(retval, TyDouble, "IntToFP");
+    Value *retval = scaff_->builder_.CreateSRem(num, denom, DBG_NAME("remainder"));
+    return scaff_->builder_.CreateSIToFP(retval, TyDouble, DBG_NAME("IntToFP"));
 }
 
 /***DOC SIN
@@ -624,8 +617,8 @@ Value *Compiler::genSin(const DatumPtr &node, RequestReturnType returnType)
     Value *num = generateChild(node.astnodeValue(), 0, RequestReturnReal);
 
     Value *degToRad = CoDouble(PI / 180);
-    Value *theta = scaff->builder.CreateFMul(num, degToRad, "theta");
-    return generateCallExtern(TyDouble, sin, PaDouble(theta));
+    Value *theta = scaff_->builder_.CreateFMul(num, degToRad, DBG_NAME("theta"));
+    return generateCallExternTyped(static_cast<double (*)(double)>(sin), "sin", {PaDouble(theta)});
 }
 
 /***DOC INT
@@ -642,7 +635,7 @@ Value *Compiler::genInt(const DatumPtr &node, RequestReturnType returnType)
 {
     Q_ASSERT(returnType && RequestReturnReal);
     Value *num = generateChild(node.astnodeValue(), 0, RequestReturnReal);
-    return generateCallExtern(TyDouble, trunc, PaDouble(num));
+    return generateCallExternTyped(static_cast<double (*)(double)>(trunc), "trunc", {PaDouble(num)});
 }
 
 /***DOC ROUND
@@ -656,7 +649,7 @@ Value *Compiler::genRound(const DatumPtr &node, RequestReturnType returnType)
 {
     Q_ASSERT(returnType && RequestReturnReal);
     Value *num = generateChild(node.astnodeValue(), 0, RequestReturnReal);
-    return generateCallExtern(TyDouble, round, PaDouble(num));
+    return generateCallExternTyped(static_cast<double (*)(double)>(round), "round", {PaDouble(num)});
 }
 
 /***DOC EXP
@@ -670,7 +663,7 @@ Value *Compiler::genExp(const DatumPtr &node, RequestReturnType returnType)
 {
     Q_ASSERT(returnType && RequestReturnReal);
     Value *num = generateChild(node.astnodeValue(), 0, RequestReturnReal);
-    return generateCallExtern(TyDouble, exp, PaDouble(num));
+    return generateCallExternTyped(static_cast<double (*)(double)>(exp), "exp", {PaDouble(num)});
 }
 
 /***DOC LOG10
@@ -686,7 +679,7 @@ Value *Compiler::genLog10(const DatumPtr &node, RequestReturnType returnType)
     Q_ASSERT(returnType && RequestReturnReal);
     Value *num = generateChild(node.astnodeValue(), 0, RequestReturnReal);
     num = generateGTZeroFromDouble(node.astnodeValue(), num);
-    return generateCallExtern(TyDouble, log10, PaDouble(num));
+    return generateCallExternTyped(static_cast<double (*)(double)>(log10), "log10", {PaDouble(num)});
 }
 
 /***DOC LN
@@ -702,7 +695,7 @@ Value *Compiler::genLn(const DatumPtr &node, RequestReturnType returnType)
     Q_ASSERT(returnType && RequestReturnReal);
     Value *num = generateChild(node.astnodeValue(), 0, RequestReturnReal);
     num = generateGTZeroFromDouble(node.astnodeValue(), num);
-    return generateCallExtern(TyDouble, log, PaDouble(num));
+    return generateCallExternTyped(static_cast<double (*)(double)>(log), "log", {PaDouble(num)});
 }
 
 /***DOC RADSIN
@@ -716,7 +709,7 @@ Value *Compiler::genRadsin(const DatumPtr &node, RequestReturnType returnType)
 {
     Q_ASSERT(returnType && RequestReturnReal);
     Value *num = generateChild(node.astnodeValue(), 0, RequestReturnReal);
-    return generateCallExtern(TyDouble, sin, PaDouble(num));
+    return generateCallExternTyped(static_cast<double (*)(double)>(sin), "sin", {PaDouble(num)});
 }
 
 /***DOC RADCOS
@@ -730,7 +723,7 @@ Value *Compiler::genRadcos(const DatumPtr &node, RequestReturnType returnType)
 {
     Q_ASSERT(returnType && RequestReturnReal);
     Value *num = generateChild(node.astnodeValue(), 0, RequestReturnReal);
-    return generateCallExtern(TyDouble, cos, PaDouble(num));
+    return generateCallExternTyped(static_cast<double (*)(double)>(cos), "cos", {PaDouble(num)});
 }
 
 /***DOC RADARCTAN
@@ -756,11 +749,11 @@ Value *Compiler::genRadarctan(const DatumPtr &node, RequestReturnType returnType
     // Calculate atan() or atan2() depending on number of children.
     if (children.size() == 1)
     {
-        retval = generateCallExtern(TyDouble, atan, PaDouble(children[0]));
+        retval = generateCallExternTyped(static_cast<double (*)(double)>(atan), "atan", {PaDouble(children[0])});
     }
     else
     {
-        retval = generateCallExtern(TyDouble, atan2, PaDouble(children[1]), PaDouble(children[0]));
+        retval = generateCallExternTyped(static_cast<double (*)(double, double)>(atan2), "atan2", {PaDouble(children[1]), PaDouble(children[0])});
     }
     return retval;
 }
@@ -778,8 +771,8 @@ Value *Compiler::genCos(const DatumPtr &node, RequestReturnType returnType)
     Value *num = generateChild(node.astnodeValue(), 0, RequestReturnReal);
 
     Value *degToRad = CoDouble(PI / 180);
-    Value *theta = scaff->builder.CreateFMul(num, degToRad, "theta");
-    return generateCallExtern(TyDouble, cos, PaDouble(theta));
+    Value *theta = scaff_->builder_.CreateFMul(num, degToRad, DBG_NAME("theta"));
+    return generateCallExternTyped(static_cast<double (*)(double)>(cos), "cos", {PaDouble(theta)});
 }
 
 /***DOC LESSP LESS?
@@ -797,7 +790,7 @@ Value *Compiler::genLessp(const DatumPtr &node, RequestReturnType returnType)
     Q_ASSERT(returnType && RequestReturnBool);
     Value *num1 = generateChild(node.astnodeValue(), 0, RequestReturnReal);
     Value *num2 = generateChild(node.astnodeValue(), 1, RequestReturnReal);
-    return scaff->builder.CreateFCmpULT(num1, num2, "lessp");
+    return scaff_->builder_.CreateFCmpULT(num1, num2, DBG_NAME("lessp"));
 }
 
 /***DOC GREATERP GREATER?
@@ -815,7 +808,7 @@ Value *Compiler::genGreaterp(const DatumPtr &node, RequestReturnType returnType)
     Q_ASSERT(returnType && RequestReturnBool);
     Value *num1 = generateChild(node.astnodeValue(), 0, RequestReturnReal);
     Value *num2 = generateChild(node.astnodeValue(), 1, RequestReturnReal);
-    return scaff->builder.CreateFCmpUGT(num1, num2, "greaterp");
+    return scaff_->builder_.CreateFCmpUGT(num1, num2, DBG_NAME("greaterp"));
 }
 
 /***DOC LESSEQUALP LESSEQUAL?
@@ -833,7 +826,7 @@ Value *Compiler::genLessequalp(const DatumPtr &node, RequestReturnType returnTyp
     Q_ASSERT(returnType && RequestReturnBool);
     Value *num1 = generateChild(node.astnodeValue(), 0, RequestReturnReal);
     Value *num2 = generateChild(node.astnodeValue(), 1, RequestReturnReal);
-    return scaff->builder.CreateFCmpULE(num1, num2, "lessp");
+    return scaff_->builder_.CreateFCmpULE(num1, num2, DBG_NAME("lessp"));
 }
 
 /***DOC GREATEREQUALP GREATEREQUAL?
@@ -851,7 +844,7 @@ Value *Compiler::genGreaterequalp(const DatumPtr &node, RequestReturnType return
     Q_ASSERT(returnType && RequestReturnBool);
     Value *num1 = generateChild(node.astnodeValue(), 0, RequestReturnReal);
     Value *num2 = generateChild(node.astnodeValue(), 1, RequestReturnReal);
-    return scaff->builder.CreateFCmpUGE(num1, num2, "greaterp");
+    return scaff_->builder_.CreateFCmpUGE(num1, num2, DBG_NAME("greaterp"));
 }
 
 /***DOC NOT
@@ -868,7 +861,7 @@ Value *Compiler::genNot(const DatumPtr &node, RequestReturnType returnType)
 {
     Q_ASSERT(returnType && RequestReturnBool);
     Value *tf = generateChild(node.astnodeValue(), 0, RequestReturnBool);
-    return scaff->builder.CreateSub(CoBool(1), tf, "not");
+    return scaff_->builder_.CreateSub(CoBool(1), tf, DBG_NAME("not"));
 }
 
 /***DOC RANDOM
@@ -904,28 +897,28 @@ Value *Compiler::genRandom(const DatumPtr &node, RequestReturnType returnType)
 
     if (children.size() == 1)
     {
-        return generateCallExtern(TyDouble, random1, PaInt32(iChildren[0]));
+        return generateCallExtern(random1, PaInt32(iChildren[0]));
     }
 
-    Function *theFunction = scaff->builder.GetInsertBlock()->getParent();
+    BasicBlock *notGTBB = scaff_->createBasicBlock(DBG_NAME("notGT"));
+    BasicBlock *isGTBB = scaff_->createBasicBlock(DBG_NAME("isGT"));
 
-    BasicBlock *notGTBB = BasicBlock::Create(*scaff->theContext, "notGT", theFunction);
-    BasicBlock *isGTBB = BasicBlock::Create(*scaff->theContext, "isGT", theFunction);
+    scaff_->addColdPathBlocks(notGTBB);
 
     Value *start = iChildren[0];
     Value *end = iChildren[1];
 
-    Value *cond = scaff->builder.CreateICmpSLT(start, end, "isValidTest");
-    scaff->builder.CreateCondBr(cond, isGTBB, notGTBB);
+    Value *cond = scaff_->builder_.CreateICmpSLT(start, end, DBG_NAME("isValidTest"));
+    scaff_->builder_.CreateCondBr(cond, isGTBB, notGTBB);
 
-    scaff->builder.SetInsertPoint(notGTBB);
+    scaff_->builder_.SetInsertPoint(notGTBB);
     Value *errWhat = generateWordFromDouble(children[1]);
     Value *errObj = generateErrorNoLike(node.astnodeValue(), errWhat);
-    scaff->builder.CreateRet(errObj);
+    generateReturn(errObj);
 
-    scaff->builder.SetInsertPoint(isGTBB);
+    scaff_->builder_.SetInsertPoint(isGTBB);
 
-    return generateCallExtern(TyDouble, random2, PaInt32(iChildren[0]), PaInt32(iChildren[1]));
+    return generateCallExtern(random2, PaInt32(iChildren[0]), PaInt32(iChildren[1]));
 }
 
 /***DOC RERANDOM
@@ -950,11 +943,11 @@ Value *Compiler::genRerandom(const DatumPtr &node, RequestReturnType returnType)
     {
         Value *seed = generateNotNegativeFromDouble(node.astnodeValue(), children[0]);
         seed = generateInt32FromDouble(node.astnodeValue(), seed, true);
-        generateCallExtern(TyVoid, setRandomWithSeed, PaInt32(seed));
+        generateCallExtern(setRandomWithSeed, PaInt32(seed));
     }
     else
     {
-        generateCallExtern(TyVoid, setRandom, {});
+        generateCallExtern(setRandom);
     }
     return generateVoidRetval(node);
 }
@@ -983,7 +976,7 @@ Value *Compiler::genForm(const DatumPtr &node, RequestReturnType returnType)
     precision = generateNotNegativeFromDouble(node.astnodeValue(), precision);
     precision = generateInt32FromDouble(node.astnodeValue(), precision, true);
     return generateCallExtern(
-        TyAddr, getFormForNumber, PaAddr(evaluator), PaDouble(num), PaInt32(width), PaInt32(precision));
+        getFormForNumber, PaAddr(scaff_->evaluator_), PaDouble(num), PaInt32(width), PaInt32(precision));
 }
 
 // Add infix entries to table. This will cause an error if they are used as
@@ -1054,7 +1047,7 @@ Value *Compiler::genOr(const DatumPtr &node, RequestReturnType returnType)
 
 Value *Compiler::generateAndOr(const DatumPtr &node, RequestReturnType returnType, bool isAnd)
 {
-    Function *theFunction = scaff->builder.GetInsertBlock()->getParent();
+    Function *theFunction = scaff_->builder_.GetInsertBlock()->getParent();
 
     Q_ASSERT(returnType && RequestReturnBool);
     std::vector<Value *> children = generateChildren(node.astnodeValue(), RequestReturnDB);
@@ -1064,9 +1057,9 @@ Value *Compiler::generateAndOr(const DatumPtr &node, RequestReturnType returnTyp
         return CoBool(isAnd);
 
     BasicBlock *continueBB; // Where to go if a test results in mayContinue
-    BasicBlock *exitNoContBB = BasicBlock::Create(*scaff->theContext, "exitNoCont");
-    BasicBlock *exitMayContBB = BasicBlock::Create(*scaff->theContext, "exitMayCont");
-    BasicBlock *exitBB = BasicBlock::Create(*scaff->theContext, "exit");
+    BasicBlock *exitNoContBB = BasicBlock::Create(*scaff_->theContext_, DBG_NAME("exitNoCont"));
+    BasicBlock *exitMayContBB = BasicBlock::Create(*scaff_->theContext_, DBG_NAME("exitMayCont"));
+    BasicBlock *exitBB = BasicBlock::Create(*scaff_->theContext_, DBG_NAME("exit"));
     for (auto &child : children)
     {
         Value *c = child;
@@ -1080,12 +1073,12 @@ Value *Compiler::generateAndOr(const DatumPtr &node, RequestReturnType returnTyp
         }
         if (c->getType()->isIntegerTy(1))
         {
-            continueBB = BasicBlock::Create(*scaff->theContext, "isPossCont");
-            Value *cond = scaff->builder.CreateICmpEQ(c, CoBool(isAnd), "isPossTest");
-            scaff->builder.CreateCondBr(cond, continueBB, exitNoContBB);
+            continueBB = BasicBlock::Create(*scaff_->theContext_, DBG_NAME("isPossCont"));
+            Value *cond = scaff_->builder_.CreateICmpEQ(c, CoBool(isAnd), DBG_NAME("isPossTest"));
+            scaff_->builder_.CreateCondBr(cond, continueBB, exitNoContBB);
 
             theFunction->insert(theFunction->end(), continueBB);
-            scaff->builder.SetInsertPoint(continueBB);
+            scaff_->builder_.SetInsertPoint(continueBB);
         }
         else
         {
@@ -1093,21 +1086,21 @@ Value *Compiler::generateAndOr(const DatumPtr &node, RequestReturnType returnTyp
         }
     }
     // If we made it this far then all tests have resulted in isAnd
-    scaff->builder.CreateBr(exitMayContBB);
+    scaff_->builder_.CreateBr(exitMayContBB);
 
     theFunction->insert(theFunction->end(), exitMayContBB);
-    scaff->builder.SetInsertPoint(exitMayContBB);
-    scaff->builder.CreateBr(exitBB);
+    scaff_->builder_.SetInsertPoint(exitMayContBB);
+    scaff_->builder_.CreateBr(exitBB);
 
     // If we get here then a test resulted in !isAnd
     theFunction->insert(theFunction->end(), exitNoContBB);
-    scaff->builder.SetInsertPoint(exitNoContBB);
-    scaff->builder.CreateBr(exitBB);
+    scaff_->builder_.SetInsertPoint(exitNoContBB);
+    scaff_->builder_.CreateBr(exitBB);
 
     // Return the T/F
     theFunction->insert(theFunction->end(), exitBB);
-    scaff->builder.SetInsertPoint(exitBB);
-    PHINode *phiNode = scaff->builder.CreatePHI(TyBool, 2, "retval");
+    scaff_->builder_.SetInsertPoint(exitBB);
+    PHINode *phiNode = scaff_->builder_.CreatePHI(TyBool, 2, DBG_NAME("retval"));
     phiNode->addIncoming(CoBool(!isAnd), exitNoContBB);
     phiNode->addIncoming(CoBool(isAnd), exitMayContBB);
     return phiNode;
@@ -1115,35 +1108,36 @@ Value *Compiler::generateAndOr(const DatumPtr &node, RequestReturnType returnTyp
 
 Value *Compiler::generateListExecIfList(ASTNode *parent, Value *c)
 {
-    Function *theFunction = scaff->builder.GetInsertBlock()->getParent();
-
     // Test that this is a List object
-    BasicBlock *isListBB = BasicBlock::Create(*scaff->theContext, "isList", theFunction);
-    BasicBlock *isNothingBB = BasicBlock::Create(*scaff->theContext, "isNothing", theFunction);
-    BasicBlock *notListBB = BasicBlock::Create(*scaff->theContext, "notList", theFunction);
+    BasicBlock *isListBB = scaff_->createBasicBlock(DBG_NAME("isList"));
+    BasicBlock *isNothingBB = scaff_->createBasicBlock(DBG_NAME("isNothing"));
+    BasicBlock *notListBB = scaff_->createBasicBlock(DBG_NAME("notList"));
 
-    BasicBlock *listTestBB = scaff->builder.GetInsertBlock();
+    scaff_->addColdPathBlocks(isNothingBB);
+
+    BasicBlock *listTestBB = scaff_->builder_.GetInsertBlock();
     Value *dType = generateGetDatumIsa(c);
-    Value *mask = scaff->builder.CreateAnd(dType, CoInt32(Datum::typeList), "dataTypeMask");
-    Value *cond = scaff->builder.CreateICmpNE(mask, CoInt32(0), "dataTypeMaskTest");
-    scaff->builder.CreateCondBr(cond, isListBB, notListBB);
+    Value *mask = scaff_->builder_.CreateAnd(dType, CoInt32(Datum::typeList), DBG_NAME("dataTypeMask"));
+    Value *cond = scaff_->builder_.CreateICmpNE(mask, CoInt32(0), DBG_NAME("dataTypeMaskTest"));
+    scaff_->builder_.CreateCondBr(cond, isListBB, notListBB);
 
-    scaff->builder.SetInsertPoint(isListBB);
-    // The list gets executed.
+    scaff_->builder_.SetInsertPoint(isListBB);
+    // The list gets executed (push/suspend/resume/pop); on return we are in the resume block.
     Value *listRunResult = generateCallList(c, RequestReturnDatum);
+    BasicBlock *listRunResultBB = scaff_->builder_.GetInsertBlock();
     Value *listRunResultType = generateGetDatumIsa(listRunResult);
     Value *listRunResultCond =
-        scaff->builder.CreateICmpEQ(listRunResultType, CoInt32(Datum::typeASTNode), "listRunResultTypeTest");
-    scaff->builder.CreateCondBr(listRunResultCond, isNothingBB, notListBB);
+        scaff_->builder_.CreateICmpEQ(listRunResultType, CoInt32(Datum::typeASTNode), DBG_NAME("listRunResultTypeTest"));
+    scaff_->builder_.CreateCondBr(listRunResultCond, isNothingBB, notListBB);
 
     // List execution resulted in nothing.
-    scaff->builder.SetInsertPoint(isNothingBB);
+    scaff_->builder_.SetInsertPoint(isNothingBB);
     Value *errNoOutput = generateErrorNoOutput(c, parent);
-    scaff->builder.CreateRet(errNoOutput);
+    generateReturn(errNoOutput);
 
-    scaff->builder.SetInsertPoint(notListBB);
-    PHINode *retval = scaff->builder.CreatePHI(TyAddr, 2, "isWordPhi");
-    retval->addIncoming(listRunResult, isListBB);
+    scaff_->builder_.SetInsertPoint(notListBB);
+    PHINode *retval = scaff_->builder_.CreatePHI(TyAddr, 2, DBG_NAME("isWordPhi"));
+    retval->addIncoming(listRunResult, listRunResultBB);
     retval->addIncoming(c, listTestBB);
 
     return retval;

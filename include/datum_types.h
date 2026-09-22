@@ -4,9 +4,11 @@
 #include "datum_ptr.h"
 #include <QList>
 #include <QString>
+#include <memory>
 
 class ListIterator;
 class VisitedSet;
+struct CompiledText;
 
 /// Convert "raw" encoding to Char encoding.
 QChar rawToChar(const QChar &src);
@@ -148,6 +150,9 @@ class List : public Datum
     /// Set to one when the list is modified to trigger recompilation, if needed.
     qint64 compileTimeStamp = 0;
 
+    /// @brief Cached JIT module for this list, if compiled.
+    std::shared_ptr<CompiledText> compiledText_;
+
     /// @brief Create a new list by attaching item as the head of srcList.
     ///
     /// @param item The item to add to the head of the list.
@@ -212,16 +217,12 @@ class EmptyList : public List
     /// @return A pointer to the singleton EmptyList instance.
     static EmptyList *instance();
 
-    /// @brief Deleted copy constructor to prevent copying.
+    // Deleted operators to prevent copying.
     EmptyList(const EmptyList &) = delete;
-
-    /// @brief Deleted assignment operator to prevent assignment.
+    EmptyList(EmptyList *) = delete;
     EmptyList &operator=(const EmptyList &) = delete;
-
-    /// @brief Deleted move constructor to prevent moving.
+    EmptyList &operator=(EmptyList *) = delete;
     EmptyList(EmptyList &&) = delete;
-
-    /// @brief Deleted move assignment operator to prevent move assignment.
     EmptyList &operator=(EmptyList &&) = delete;
 
     QString toString(ToStringFlags flags = ToStringFlags_None,

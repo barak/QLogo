@@ -18,15 +18,18 @@
 //===----------------------------------------------------------------------===//
 
 #include "datum_ptr.h"
-#include "workspace/library.h"
 #include "workspace/callframe.h"
+#include "workspace/evaluator.h"
 #include "workspace/propertylists.h"
 #include <QColor>
 #include <QSet>
+#include <deque>
 #include <QVector>
+#include <memory>
 
 class ProcedureScope;
 class TextStream;
+class Evaluator;
 
 /// @brief Special variables.
 /// @note These are variable names that are used to store special values.
@@ -40,35 +43,23 @@ enum SpecialNames
 /// language and maintains the state of execution of the QLogo code.
 class Kernel
 {
-    DatumPtr filePrefix;
+    PropertyLists plists_;
 
-    PropertyLists plists;
 
-    QHash<QString, TextStream *> fileStreams;
-    QSet<TextStream *> writableStreams;
-    QSet<TextStream *> readableStreams;
-    TextStream *readStream;
-    TextStream *systemReadStream;
-    TextStream *writeStream;
-    TextStream *systemWriteStream;
-    TextStream *stdioStream;
-
-    bool isPausing;
-
-    void closeAll();
+    bool isPausing_;
 
     void initPalette();
+
+    /// @brief Run the explicit control evaluator.
+    /// @param listP The list to run.
+    /// @return The result of the last expression in the list.
+    DatumPtr runECE();
 
     /// Initialize LOGO system variables
     void initVariables();
 
     /// @brief Private constructor for singleton pattern.
     Kernel();
-
-    Kernel(const Kernel &) = delete;
-    Kernel(Kernel &&) = delete;
-    Kernel &operator=(const Kernel &) = delete;
-    Kernel &operator=(Kernel &&) = delete;
 
   public:
     /// @brief Get the singleton instance of the Kernel class.
@@ -79,19 +70,119 @@ class Kernel
         return instance;
     }
 
-    /// @brief The current error, if any.
-    DatumPtr currentError;
+    // Deleted operators to prevent copying.
+    Kernel(const Kernel &) = delete;
+    Kernel(Kernel *) = delete;
+    Kernel(Kernel &&) = delete;
+    Kernel &operator=(const Kernel &) = delete;
+    Kernel &operator=(Kernel &&) = delete;
 
     /// @brief Destructor.
     ~Kernel();
 
-    /// @brief The procedure frame stack
-    CallFrameStack callStack;
+    /// @brief The call frame stack.
+    /// @note This stack is used to store the evaluation state of procedures while they are executing.
+    std::deque<CallFrame> callFrameStack_;
+
+    /// @brief The evaluation stack.
+    /// @note This stack is used to store the evaluation state of lists while they are executing.
+    std::deque<Evaluator> evaluationStack_;
+
+    /************ variables ************/
+
+    /// @brief The variables hash.
+    QHash<QString, DatumPtr> variables_;
+
+    // SPECIAL VARIABLES
+    Datum *specialVar(SpecialNames name) const;
+
+    /// @brief Set a value for a variable.
+    /// @param aDatum The value to store.
+    /// @param name The name of the variable to set.
+    void setDatumForName(const DatumPtr &aDatum, const QString &name);
+
+    /// @brief Return the value of a variable.
+    /// @param name The name of the variable to search for.
+    /// @return The stored value associated with 'name' or 'nothing' if the variable is not found.
+    DatumPtr datumForName(const QString &name) const;
+
+    /// @brief Return true if value keyed by name exists in the variables hash.
+    /// @param name The name of the variable to search for.
+    /// @return True if the variable exists, false otherwise.
+    bool doesExist(const QString &name) const;
+
+    /// @brief Erase name and its value from the variables hash.
+    /// @param name The name of the variable to erase.
+    void eraseVar(const QString &name);
+
+    /// @brief Return a list of all variables defined.
+    /// @return A list of all variables defined.
+    DatumPtr allVariables() const;
+
+    /// @brief Repcount is for use in looping functions (e.g. REPEAT)
+    double repcount_ = -1;
+
+    /// @brief Set the test state for TEST/IFTRUE/IFFALSE.
+    /// @note Sets the test state for the current call frame.
+    /// @param isTrue The value to set the test state to.
+    void setTest(bool isTrue);
+
+    /// @brief Get the test state for TEST/IFTRUE/IFFALSE.
+    /// @note Searches the call frame stack for the first non-zero test state.
+    /// @note 0 = not tested, 3 = tested true, 2 = tested false.
+    /// @return The test state for the highest non-zero test state in the call frame stack.
+    int8_t testedState() const;
+
+    /************ ECE ************/
+
+    /// @brief The next operation to perform.
+    void(Kernel::*nextOperation_)() = nullptr;
+
+    /// @brief The source list that returned the return value.
+    DatumPtr retvalSourceList_;
+
+    /// @brief Begin a procedure.
+    /// @param node The ASTNode that holds the command, the procedure name and parameters.
+    /// @param paramAry The parameters to apply to the procedure.
+    /// @param paramCount The number of parameters to the procedure.
+    void beginProcedure(ASTNode *node, Datum **paramAry, uint32_t paramCount);
+
+    /// @brief Get the current call frame.
+    CallFrame *currentCallFrame();
+
+    /// @brief Get the topmost evaluator from the evaluation stack.
+    Evaluator *currentEvaluator();
+
+    /// @brief Begin or continue evaluating a list. Will return when execution is suspended.
+    void ece_evaluateStack();
+
+    /// @brief Decide what to do next after emptying the evaluation stack.
+    void ece_decideEmptyEvaluationStack();
+
+    /// @brief Begin or continue processing procedure arguments.
+    void ece_processArguments();
+
+    /// @brief Pop the topmost evaluator from the evaluation stack.
+    void ece_popEvaluator();
+
+    /// Begin the procedure.
+    void ece_beginProcedure();
+
+    /// @brief Exit the current procedure.
+    void ece_exitProcedure();
+
+    /// @brief Process the parameters and arguments for the current procedure.
+    void ece_processParameters();
+
+    /************ miscellaneous ************/
 
     /// @brief The palette of colors.
     /// @details The first 16 colors [0-15] are the standard Logo colors. The first 8
     /// are immutable. The rest [8-100] are user-assignable.
-    QVector<QColor> palette;
+    QVector<QColor> palette_;
+
+    /// @brief The current error, if any.
+    DatumPtr currentError_;
 
     /// @brief READ a line of input, EVALUATE it, PRINT the result, LOOP.
     /// @param isPausing Whether we are in a PAUSE loop.
@@ -100,26 +191,20 @@ class Kernel
     /// @note The return value is useful only in the case of PAUSE.
     DatumPtr readEvalPrintLoop(bool isPausing, const QString &prompt = QString());
 
+    /// @brief Get the procedure name from a TO or .MACRO node.
+    /// @param node The ASTNode that holds the command, the procedure name and parameters.
+    /// @return The procedure name.
+    DatumPtr procnameFromNode(ASTNode *node);
+
+    /// @brief Get the procedure parameters from a TO or .MACRO node.
+    /// @param node The ASTNode that holds the command, the procedure name and parameters.
+    /// @return The procedure parameters as a list with ':' and '"' filered out from the parameter names.
+    DatumPtr procParametersFromNode(ASTNode *node);
+
     /// @brief Input the body of a procedure.
     /// @param node the ASTNode that holds the command, the procedure name and parameters.
     /// @return the given node on success or Error on error.
     Datum *inputProcedure(ASTNode *node);
-
-    /// @brief Print a string to the standard output.
-    /// @param text The text to print.
-    /// @details This method prints a string to the standard output. The standard
-    /// output can either be the console or a file, or both in the case of dribbling.
-    void stdPrint(const QString &text) const;
-
-    /// @brief Print a string to the system output.
-    /// @param text The text to print.
-    void sysPrint(const QString &text) const;
-
-    /// @brief Run a list.
-    /// @param listP The list to run.
-    /// @param startTag If not null, search for the tag in the list and run from there.
-    /// @return The result of the last expression in the list.
-    DatumPtr runList(const DatumPtr &listP);
 
     /// @brief Convert a Datum to a QColor.
     /// @param colorP The Datum to convert.
@@ -133,13 +218,6 @@ class Kernel
     /// @return The QVector<double>.
     bool numbersFromList(QVector<double> &retval, const DatumPtr &listP) const;
 
-    /// @brief Get the filepath for a filename.
-    /// @param filenameP The filename to get the filepath for.
-    /// @return The filepath for the filename with the current file prefix.
-    QString filepathForFilename(const DatumPtr &filenameP) const;
-
-    // SPECIAL VARIABLES
-    Datum *specialVar(SpecialNames name) const;
 
     /// @brief Perform pause, essentially a REPL loop.
     /// @return The value passed to CONTINUE, if any.

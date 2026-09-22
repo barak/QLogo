@@ -6,16 +6,11 @@
 
 #include <QString>
 
-#define generateCallExtern(RET_TYPE, FUNC_NAME, ...) \
-    (generateExternFunctionCall(RET_TYPE, #FUNC_NAME, {__VA_ARGS__}))
-
 #ifdef _WIN32
 #define EXPORTC extern "C" __declspec(dllexport)
 #else
 #define EXPORTC extern "C"
 #endif
-
-bool isDatumInContainer(VisitedSet &visited, Datum *value, Datum *container, Qt::CaseSensitivity cs);
 
 EXPORTC void printInt(int32_t p);
 EXPORTC double getDoubleForDatum(addr_t eAddr, addr_t datumAddr);
@@ -23,13 +18,14 @@ EXPORTC bool getValidityOfDoubleForDatum(addr_t eAddr, addr_t datumAddr);
 EXPORTC bool getBoolForDatum(addr_t eAddr, addr_t datumAddr);
 EXPORTC bool getValidityOfBoolForDatum(addr_t eAddr, addr_t datumAddr);
 EXPORTC addr_t getDatumForVarname(addr_t wordAddr);
-EXPORTC addr_t stdWriteDatum(addr_t datumAddr, bool useShow);
-EXPORTC addr_t stdWriteDatumAry(addr_t datumAddr, uint32_t count, bool useShow, bool addWhitespace);
+EXPORTC addr_t stdWriteDatum(addr_t eAddr, addr_t astnodeAddr, addr_t datumAddr, bool useShow);
+EXPORTC addr_t stdWriteDatumAry(addr_t eAddr, addr_t astnodeAddr, addr_t datumAddr, uint32_t count, bool useShow, bool addWhitespace);
 EXPORTC addr_t getWordForDouble(addr_t eAddr, double val);
 EXPORTC addr_t getWordForBool(addr_t eAddr, bool val);
 EXPORTC void setDatumForWord(addr_t datumAddr, addr_t wordAddr);
-EXPORTC addr_t runList(addr_t eAddr, addr_t listAddr);
-EXPORTC addr_t runProcedure(addr_t eAddr, addr_t astnodeAddr, addr_t paramAryAddr, uint32_t paramCount);
+EXPORTC void pushListOntoEvaluationStack(addr_t eAddr, addr_t listAddr);
+EXPORTC addr_t getLastEvaluationResult(addr_t eAddr);
+EXPORTC void beginProcedure(addr_t eAddr, addr_t astnodeAddr, addr_t paramAryAddr, uint32_t paramCount);
 EXPORTC addr_t getErrorSystem(addr_t eAddr);
 EXPORTC addr_t getErrorToplevel(addr_t eAddr);
 EXPORTC addr_t getErrorNoLike(addr_t eAddr, addr_t whoAddr, addr_t whatAddr);
@@ -38,9 +34,10 @@ EXPORTC addr_t getErrorNoTest(addr_t eAddr, addr_t whoAddr);
 EXPORTC addr_t getErrorNoOutput(addr_t eAddr, addr_t xAddr, addr_t yAddr);
 EXPORTC addr_t getErrorNotEnoughInputs(addr_t eAddr, addr_t xAddr);
 EXPORTC addr_t getErrorNoValue(addr_t eAddr, addr_t whatAddr);
+EXPORTC addr_t getErrorNoGraphics(addr_t eAddr);
 EXPORTC addr_t getErrorCustom(addr_t eAddr, addr_t tagAddr, addr_t outputAddr);
 EXPORTC addr_t getCtrlReturn(addr_t eAddr, addr_t astNodeAddr, addr_t retvalAddr);
-EXPORTC addr_t getCtrlContinuation(addr_t eAddr, addr_t astNodeAddr, addr_t paramAryAddr, uint32_t paramCount);
+EXPORTC addr_t getCtrlContinuation(addr_t eAddr, addr_t astNodeAddr, addr_t argAryAddr, uint32_t argCount);
 EXPORTC addr_t getCtrlGoto(addr_t eAddr, addr_t astNodeAddr, addr_t tagAddr);
 EXPORTC int32_t getCountOfList(addr_t listAddr);
 EXPORTC int32_t getNumberAryFromList(addr_t listAddr, addr_t destAddr);
@@ -57,8 +54,7 @@ EXPORTC addr_t callPause(addr_t eAddr);
 EXPORTC addr_t generateContinue(addr_t eAddr, addr_t outputAddr);
 EXPORTC addr_t processRunresult(addr_t eAddr, addr_t resultAddr);
 EXPORTC void saveTestResult(bool tf);
-EXPORTC bool getIsTested(void);
-EXPORTC bool getTestResult();
+EXPORTC int8_t getTestResult(void);
 EXPORTC bool cmpDatumToBool(addr_t d, bool b);
 EXPORTC bool cmpDatumToDouble(addr_t d, double n);
 EXPORTC bool cmpDatumToDatum(addr_t eAddr, addr_t d1, addr_t d2);
@@ -98,12 +94,12 @@ EXPORTC addr_t uppercase(addr_t eAddr, addr_t wordAddr);
 EXPORTC addr_t standout(addr_t eAddr, addr_t thingAddr);
 EXPORTC addr_t parse(addr_t eAddr, addr_t wordAddr);
 EXPORTC addr_t runparseDatum(addr_t eAddr, addr_t wordorlistAddr);
-EXPORTC void moveTurtleForward(double distance);
+EXPORTC addr_t moveTurtleForward(ASTNode *node, double distance);
 EXPORTC void moveTurtleRotate(double angle);
-EXPORTC void setTurtleXY(double x, double y);
-EXPORTC void setTurtleX(double x);
-EXPORTC void setTurtleY(double y);
-EXPORTC void setTurtlePos(addr_t posAddr);
+EXPORTC addr_t setTurtleXY(ASTNode *node, double x, double y);
+EXPORTC addr_t setTurtleX(ASTNode *node, double x);
+EXPORTC addr_t setTurtleY(ASTNode *node, double y);
+EXPORTC addr_t setTurtlePos(ASTNode *node, addr_t posAddr);
 EXPORTC void setTurtleHeading(double newHeading);
 EXPORTC void setTurtleMoveToHome(void);
 EXPORTC void drawTurtleArc(double angle, double radius);
@@ -111,16 +107,16 @@ EXPORTC addr_t getTurtlePos(addr_t eAddr);
 EXPORTC double getTurtleHeading(void);
 EXPORTC double getTurtleTowards(addr_t posAddr);
 EXPORTC addr_t getScrunch(addr_t eAddr);
-EXPORTC void setTurtleVisible(int visible);
+EXPORTC void setTurtleVisible(uint32_t visible);
 EXPORTC void clean(void);
-EXPORTC void setTurtleMode(int mode);
+EXPORTC void setTurtleMode(uint32_t mode);
 EXPORTC addr_t getBounds(addr_t eAddr);
 EXPORTC void setBounds(double x, double y);
 EXPORTC int32_t beginFilledWithColor(addr_t colorAddr);
 EXPORTC void endFilled(void);
 EXPORTC void addLabel(addr_t textAddr);
 EXPORTC void setLabelHeight(double height);
-EXPORTC void setScreenMode(int mode);
+EXPORTC void setScreenMode(uint32_t mode);
 EXPORTC bool isTurtleVisible(void);
 EXPORTC addr_t getScreenMode(addr_t eAddr);
 EXPORTC addr_t getTurtleMode(addr_t eAddr);
@@ -151,4 +147,6 @@ EXPORTC addr_t inputProcedure(addr_t eAddr, addr_t nodeAddr);
 EXPORTC void setVarAsLocal(addr_t varname);
 EXPORTC addr_t handleBadDouble(addr_t eAddr, addr_t parentAddr, double value);
 EXPORTC addr_t handleBadDatum(addr_t eAddr, addr_t parentAddr, addr_t valueAddr);
+EXPORTC addr_t q_malloc(addr_t eAddr, uint32_t size, uint32_t align);
+EXPORTC void q_free(addr_t eAddr, addr_t ptr);
 #endif // WORKSPACE_EXPORTS_H

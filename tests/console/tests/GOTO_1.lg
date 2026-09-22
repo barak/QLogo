@@ -6,3 +6,4 @@ tag "t1
 print [this should print]
 end
 proc
+proc

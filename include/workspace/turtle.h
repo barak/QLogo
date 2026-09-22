@@ -25,28 +25,29 @@
 #include "interface/logointerface.h"
 #include "sharedconstants.h"
 #include <QColor>
+#include <QPointF>
+#include <QSizeF>
 #include <QTransform>
-#include <utility>
 
 /// @brief The Turtle class is responsible for maintaining the state of the turtle,
 /// including its position, orientation, and pen state.
 class Turtle
 {
-    QTransform turtleTransform;
+    QTransform turtleTransform_;
 
-    QColor penColor;
-    TurtleModeEnum mode = turtleWindow;
+    QColor penColor_;
+    TurtleModeEnum mode_ = turtleWindow;
 
-    PenModeEnum penMode = penModePaint;
+    PenModeEnum penMode_ = penModePaint;
 
-    double penSize = Config::get().initialPensize;
+    double penSize_ = Config::get().initialPensize_;
 
-    double scaleX = 1.0;
-    double scaleY = 1.0;
+    double scaleX_ = 1.0;
+    double scaleY_ = 1.0;
 
-    bool turtleIsVisible = true;
-    bool penIsDown = true;
-    bool isFilling = false;
+    bool turtleIsVisible_ = true;
+    bool penIsDown_ = true;
+    bool isFilling_ = false;
 
     double wrapTurtle(double lineStartU,
                     double lineStartV,
@@ -57,18 +58,13 @@ class Turtle
                     bool isXBoundary,
                     double mult);
 
-    void moveTurtle(const QTransform &newTransform);
+    Datum* moveTurtle(const QTransform &newTransform);
     void moveTurtleWrap(const QTransform &newTransform);
-    void moveTurtleFence(const QTransform &newTransform);
+    Datum* moveTurtleFence(const QTransform &newTransform);
     void moveTurtleWindow(const QTransform &newTransform);
 
     /// @brief Private constructor for singleton pattern.
     Turtle();
-
-    Turtle(const Turtle &) = delete;
-    Turtle(Turtle &&) = delete;
-    Turtle &operator=(const Turtle &) = delete;
-    Turtle &operator=(Turtle &&) = delete;
 
   public:
     /// @brief Get the singleton instance of the Turtle class.
@@ -79,6 +75,13 @@ class Turtle
         return instance;
     }
 
+    // Deleted operators to prevent copying.
+    Turtle(const Turtle &) = delete;
+    Turtle(Turtle *) = delete;
+    Turtle &operator=(const Turtle &) = delete;
+    Turtle &operator=(Turtle *) = delete;
+    Turtle &operator=(Turtle &&) = delete;
+
     /// @brief Destructor for the Turtle class.
     ~Turtle() = default;
 
@@ -86,21 +89,21 @@ class Turtle
     /// @return The current turtle position and orientation.
     const QTransform &getMatrix() const
     {
-        return turtleTransform;
+        return turtleTransform_;
     }
 
     /// @brief Check if the turtle is visible.
     /// @return True if the turtle is visible, false otherwise.
     bool isTurtleVisible() const
     {
-        return turtleIsVisible;
+        return turtleIsVisible_;
     }
 
     /// @brief Set the visibility of the turtle.
     /// @param aIsVisible The new visibility state of the turtle.
     void setIsTurtleVisible(bool aIsVisible)
     {
-        turtleIsVisible = aIsVisible;
+        turtleIsVisible_ = aIsVisible;
         Config::get().mainInterface()->setTurtleIsVisible(aIsVisible);
     }
 
@@ -108,7 +111,7 @@ class Turtle
     /// @return True if the pen is down, false otherwise.
     bool isPenDown() const
     {
-        return penIsDown;
+        return penIsDown_;
     }
 
     /// @brief Set the pen down state.
@@ -129,7 +132,8 @@ class Turtle
 
     /// @brief Move the turtle forward by a given number of steps.
     /// @param steps The number of steps to move the turtle forward.
-    void forward(double steps);
+    /// @return nullptr if successful, otherwise an error.
+    Datum* forward(double steps);
 
     /// @brief Set the turtle mode.
     /// @param newMode The new turtle mode.
@@ -144,21 +148,24 @@ class Turtle
     double getHeading() const;
 
     /// @brief Get the turtle position.
-    /// @return A pair containing the x and y coordinates of the turtle.
-    std::pair<double, double> getxy() const;
+    /// @return The x and y coordinates of the turtle.
+    QPointF getxy() const;
 
     /// @brief Set the turtle position.
     /// @param x The new x coordinate of the turtle.
     /// @param y The new y coordinate of the turtle.
-    void setxy(double x, double y);
+    /// @return nullptr if successful, otherwise an error.
+    Datum* setxy(double x, double y);
 
     /// @brief Set the x coordinate of the turtle.
     /// @param x The new x coordinate of the turtle.
-    void setx(double x);
+    /// @return nullptr if successful, otherwise an error.
+    Datum* setx(double x);
 
     /// @brief Set the y coordinate of the turtle.
     /// @param y The new y coordinate of the turtle.
-    void sety(double y);
+    /// @return nullptr if successful, otherwise an error.
+    Datum* sety(double y);
 
     /// @brief Set the pen color.
     /// @param c The new pen color.
@@ -182,8 +189,8 @@ class Turtle
     const QColor &getPenColor() const;
 
     /// @brief Get the current scale factors.
-    /// @return A pair containing the X and Y scale factors.
-    std::pair<double, double> getScale() const;
+    /// @return The X and Y scale factors (width and height).
+    QSizeF getScale() const;
 
     /// @brief Set the scale factors.
     /// @param newScaleX The new X scale factor.

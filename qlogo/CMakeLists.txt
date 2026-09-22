@@ -10,6 +10,7 @@ set(QLOGO_SOURCES
   interface/inputqueue.cpp
   interface/logointerface.cpp
   interface/logointerfacegui.cpp
+  interface/streammanager.cpp
   interface/textstream.cpp
   datum/datum.cpp
   datum/datum_array.cpp
@@ -23,6 +24,7 @@ set(QLOGO_SOURCES
   logo_main.cpp
   workspace/library.cpp
   workspace/turtle.cpp
+  workspace/evaluator.cpp
   workspace/exports.cpp
   workspace/visited.cpp
   parser/treeifyer.cpp
@@ -39,8 +41,10 @@ set(QLOGO_SOURCES
   ../include/compiler_internal.h
   ../include/compiler_types.h
   ../include/interface/inputqueue.h
+  ../include/interface/pipeio.h
   ../include/interface/logointerface.h
   ../include/interface/logointerfacegui.h
+  ../include/interface/streammanager.h
   ../include/interface/textstream.h
   ../include/datum_core.h
   ../include/datum_ptr.h
@@ -49,6 +53,7 @@ set(QLOGO_SOURCES
   ../include/flowcontrol.h
   ../include/workspace/kernel.h
   ../include/primitives.h
+  ../include/workspace/evaluator.h
   ../include/workspace/exports.h
   ../include/workspace/library.h
   ../include/workspace/turtle.h
@@ -64,6 +69,11 @@ set(QLOGO_SOURCES
 
 find_package(Qt6 REQUIRED COMPONENTS Sql)
 find_package(LLVM REQUIRED CONFIG)
+
+if(MSVC)
+  include("${CMAKE_SOURCE_DIR}/cmake/FixLLVMWindowsDIA.cmake")
+  fix_llvm_windows_dia_sdk()
+endif()
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
@@ -91,6 +101,8 @@ target_compile_definitions("${QLOGO_BIN}" PRIVATE
   "LOGOVERSION=\"${PROJECT_VERSION}\""
 )
 
+target_compile_definitions("${QLOGO_BIN}" PRIVATE QT_FORCE_ASSERTS)
+
 if(APPLE)
   target_compile_definitions("${QLOGO_BIN}" PRIVATE "LOGOPLATFORM=\"OSX\"")
 elseif(WIN32 OR MINGW OR MSYS OR CYGWIN)
@@ -99,7 +111,13 @@ else()
   target_compile_definitions("${QLOGO_BIN}" PRIVATE "LOGOPLATFORM=\"UNIX\"")
 endif()
 
-llvm_config("${QLOGO_BIN}" USE_SHARED support core orcjit native irreader)
+# LLVM shared libraries (libLLVM) are not supported with the Microsoft
+# toolchain; USE_SHARED would try to link LLVM.lib, which is not built.
+if(MSVC)
+  llvm_config("${QLOGO_BIN}" support core orcjit native irreader)
+else()
+  llvm_config("${QLOGO_BIN}" USE_SHARED support core orcjit native irreader)
+endif()
 
 if(APPLE)
   target_link_libraries("${QLOGO_BIN}" PRIVATE
@@ -126,10 +144,26 @@ else()
   )
 endif()
 
+# Copy Qt runtime DLLs/plugins next to qlogo.exe so it can be run and
+# tested from the build tree without manually adjusting PATH.
 if(WIN32)
-  set_target_properties("${QLOGO_BIN}" PROPERTIES
-    WIN32_EXECUTABLE TRUE
+  get_target_property(_qlogo_qmake_location Qt6::qmake IMPORTED_LOCATION)
+  get_filename_component(_qlogo_qt_bin_dir "${_qlogo_qmake_location}" DIRECTORY)
+  find_program(WINDEPLOYQT_EXECUTABLE
+    NAMES windeployqt windeployqt6
+    HINTS "${_qlogo_qt_bin_dir}"
+    REQUIRED
+  )
+  add_custom_command(TARGET "${QLOGO_BIN}" POST_BUILD
+    COMMAND
+      "${CMAKE_COMMAND}" -E env
+      "PATH=${_qlogo_qt_bin_dir};$ENV{PATH}"
+      "${WINDEPLOYQT_EXECUTABLE}"
+      "$<IF:$<CONFIG:Debug>,--debug,--release>"
+      --no-translations
+      "$<TARGET_FILE:${QLOGO_BIN}>"
+    COMMENT "Deploying Qt runtime for ${QLOGO_BIN}"
+    VERBATIM
   )
 endif()
-
 

@@ -26,9 +26,9 @@
 #include <QFont>
 #include <QImage>
 #include <QObject>
+#include <QTextStream>
 #include <QThread>
 #include <QVector2D>
-#include <QTextStream>
 
 class QTransform;
 class Kernel;
@@ -108,14 +108,14 @@ class LogoInterface : public QObject
     /// The value of this variable is set by the handle_signal function. When the latestSignal
     /// method is called, the value is reset to noSignal.
     /// @note This is a static member to allow access from the signal handler.
-    static volatile SignalsEnum_t lastSignal;
+    static volatile SignalsEnum_t lastSignal_;
 
     /// @brief Stops communication and initiates cleanup tasks.
     virtual void closeInterface();
 
     virtual QString fileDialogModal()
     {
-        throw FCError::noGraphics();
+        exit(1);
         return {};
     }
 
@@ -126,7 +126,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to edit the text.
     virtual QString editText(const QString &text)
     {
-        throw FCError::noGraphics();
+        exit(1);
         return {};
     }
 
@@ -136,7 +136,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the turtle position.
     virtual void setTurtlePos(QTransform *newTurtlePosPtr)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Emits a vertex to the graphics system.
@@ -144,7 +144,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to emit a vertex. A vertex can be part of a polygon or a polyline or both.
     virtual void emitVertex()
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Begins a polygon.
@@ -153,7 +153,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to begin a polygon.
     virtual void beginPolygon(const QColor &color)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Ends a polygon.
@@ -161,7 +161,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to end a polygon.
     virtual void endPolygon()
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Clears the canvas.
@@ -169,7 +169,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to clear the canvas.
     virtual void clearCanvas()
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Draws a label to the canvas.
@@ -178,7 +178,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to draw a label.
     virtual void drawLabel(const QString &text)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Draws an arc to the canvas.
@@ -188,7 +188,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to draw an arc.
     virtual void drawArc(double angle, double radius)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Sets the label font name.
@@ -197,7 +197,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the label font name.
     virtual void setLabelFontName(const QString &name)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Adds the standout control characters to the given string.
@@ -215,15 +215,6 @@ class LogoInterface : public QObject
     /// @note The base method calls and returns the result from QTextStream::atEnd().
     virtual bool keyQueueHasChars();
 
-    /// @brief Sets the dribble file path.
-    /// @param filePath The path to the dribble file. Use an empty string to disable dribbling.
-    /// @return True if the dribble file was set successfully, false otherwise.
-    bool setDribble(const QString &filePath);
-
-    /// @brief Checks if the dribble file is open.
-    /// @return True if the dribble file is open, false otherwise.
-    bool isDribbling();
-
     /// @brief Sets the bounds of the canvas.
     /// @param x The x coordinate of the upper right corner of the canvas.
     /// @param y The y coordinate of the upper right corner of the canvas.
@@ -232,7 +223,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the bounds of the canvas.
     virtual void setBounds(double x, double y)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Returns the x coordinate of the upper right corner of the canvas.
@@ -241,7 +232,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the x coordinate of the upper right corner of the canvas.
     virtual double boundX() const
     {
-        throw FCError::noGraphics();
+        exit(1);
         return 0;
     }
 
@@ -251,7 +242,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the y coordinate of the upper right corner of the canvas.
     virtual double boundY() const
     {
-        throw FCError::noGraphics();
+        exit(1);
         return 0;
     }
 
@@ -261,7 +252,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the foreground color of the canvas.
     virtual void setCanvasForegroundColor(const QColor &color)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Sets the background color of the canvas.
@@ -270,7 +261,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the background color of the canvas.
     virtual void setCanvasBackgroundColor(const QColor &color)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Sets the background image of the canvas.
@@ -279,7 +270,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the background image of the canvas.
     virtual void setCanvasBackgroundImage(const QImage &image)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Returns the current background color of the canvas.
@@ -288,7 +279,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the background color of the canvas.
     virtual const QColor getCanvasBackgroundColor() const
     {
-        throw FCError::noGraphics();
+        exit(1);
         return {};
     }
 
@@ -298,7 +289,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the image of the canvas.
     virtual QImage getCanvasImage()
     {
-        throw FCError::noGraphics();
+        exit(1);
         return {};
     }
 
@@ -308,7 +299,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the state of the canvas as an SVG.
     virtual QByteArray getSvgImage()
     {
-        throw FCError::noGraphics();
+        exit(1);
         return {};
     }
 
@@ -318,7 +309,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the state of a mouse button.
     virtual bool getIsMouseButtonDown()
     {
-        throw FCError::noGraphics();
+        exit(1);
         return false;
     }
 
@@ -328,7 +319,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the ID of the mouse button that was pressed and reset the button.
     virtual int getAndResetButtonID()
     {
-        throw FCError::noGraphics();
+        exit(1);
         return 0;
     }
 
@@ -338,7 +329,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the position of the last mouse click.
     virtual QVector2D lastMouseclickPosition()
     {
-        throw FCError::noGraphics();
+        exit(1);
         return {};
     }
 
@@ -348,7 +339,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the current position of the mouse.
     virtual QVector2D mousePosition()
     {
-        throw FCError::noGraphics();
+        exit(1);
         return {};
     }
 
@@ -357,7 +348,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to clear the text on the screen.
     virtual void clearScreenText()
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Sets the cursor position.
@@ -367,7 +358,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the cursor position.
     virtual void setTextCursorPos(int x, int y)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Returns the cursor position.
@@ -377,7 +368,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the cursor position.
     virtual void getTextCursorPos(int &x, int &y)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Sets the text color.
@@ -387,7 +378,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the text color.
     virtual void setTextColor(const QColor &text, const QColor &background)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Sets the text font size.
@@ -396,7 +387,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the text font size.
     virtual void setTextFontSize(double size)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Returns the text font size.
@@ -405,7 +396,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the text font size.
     virtual double getTextFontSize() const
     {
-        throw FCError::noGraphics();
+        exit(1);
         return 12;
     }
 
@@ -415,7 +406,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the text font name.
     virtual QString getTextFontName() const
     {
-        throw FCError::noGraphics();
+        exit(1);
         return {};
     }
 
@@ -425,7 +416,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the text font name.
     virtual void setTextFontName(const QString &name)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Returns all the font names.
@@ -434,7 +425,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return all the font names.
     virtual QStringList getAllFontNames() const
     {
-        throw FCError::noGraphics();
+        exit(1);
         return {};
     }
 
@@ -444,7 +435,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the cursor overwrite mode.
     virtual void setCursorOverwriteMode(bool mode)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Returns if the cursor is in overwrite mode.
@@ -453,7 +444,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return if the cursor is in overwrite mode.
     virtual bool cursorOverwriteMode() const
     {
-        throw FCError::noGraphics();
+        exit(1);
         return false;
     }
 
@@ -463,7 +454,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the label font size.
     virtual void setLabelFontSize(double size)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Returns the label font size.
@@ -472,7 +463,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the label font size.
     virtual double getLabelFontSize() const
     {
-        throw FCError::noGraphics();
+        exit(1);
         return 12;
     }
 
@@ -482,7 +473,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the label font name.
     virtual QString getLabelFontName() const
     {
-        throw FCError::noGraphics();
+        exit(1);
         return {};
     }
 
@@ -492,7 +483,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set if the turtle is visible.
     virtual void setTurtleIsVisible(int visible)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Sets the pen mode.
@@ -501,7 +492,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the pen mode.
     virtual void setPenmode(PenModeEnum mode)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Sets if the pen is down.
@@ -510,7 +501,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set if the pen is down.
     virtual void setPenIsDown(bool down)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Sets the screen mode.
@@ -519,7 +510,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the screen mode.
     virtual void setScreenMode(ScreenModeEnum mode)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Returns the screen mode.
@@ -528,7 +519,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return the screen mode.
     virtual ScreenModeEnum getScreenMode() const
     {
-        throw FCError::noGraphics();
+        exit(1);
         return textScreenMode;
     }
 
@@ -538,7 +529,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the pen size.
     virtual void setPensize(double size)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Queries the graphics engine if the pen size is valid.
@@ -548,7 +539,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return if the pen size is valid.
     virtual bool isPenSizeValid(double size) const
     {
-        throw FCError::noGraphics();
+        exit(1);
         return false;
     }
 
@@ -558,7 +549,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set if the canvas is bounded.
     virtual void setIsCanvasBounded(bool bounded)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
     /// @brief Returns true if the canvas is bounded.
@@ -567,7 +558,7 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to return if the canvas is bounded.
     virtual bool isCanvasBounded() const
     {
-        throw FCError::noGraphics();
+        exit(1);
         return false;
     }
 
@@ -578,14 +569,11 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the splitter size ratios.
     virtual void setSplitterSizeRatios(float ratio1, float ratio2)
     {
-        throw FCError::noGraphics();
+        exit(1);
     }
 
   protected:
-    QTextStream *dribbleStream;
-
-    QTextStream inStream;
-    QTextStream outStream;
+    bool inputAtEof_ = false;
 };
 
 #endif // LOGOINTERFACE_H

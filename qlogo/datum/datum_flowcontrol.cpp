@@ -31,16 +31,16 @@ void FCError::commonInit()
 
     // If the error is a bad default expression, don't report the procedure
     // or line.
-    if (code != ERR_BAD_DEFAULT_EXPRESSION)
+    if (code_ != ERR_BAD_DEFAULT_EXPRESSION)
     {
-        CallFrame *cf = k->callStack.localFrame();
-        if (cf->sourceNode.isASTNode())
+        CallFrame *cf = k->currentCallFrame();
+        if (cf->sourceNode_.isASTNode())
         {
-            procedure() = cf->sourceNode.astnodeValue()->nodeName;
-            line() = cf->localEvaluator()->list;
+            procedure() = cf->sourceNode_.astnodeValue()->nodeName_;
+            line() = cf->topEvaluator()->list_;
         }
     }
-    k->currentError = DatumPtr(this);
+    k->currentError_ = DatumPtr(this);
 }
 
 FCError *FCError::custom(const DatumPtr &tag, DatumPtr message, const DatumPtr &output)

@@ -19,19 +19,24 @@
 
 #include "compiler_types.h"
 #include "datum_ptr.h"
+#include "compiler_internal.h"
+#include "workspace/jit_export_traits.h"
 
-// llvm #defines "emit". Qt uses "emit" as a function name.
+// Qt #defines "emit". llvm uses "emit" as a function name.
 #ifdef emit
 #undef emit
 #endif
 
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Transforms/Scalar/GVN.h"
 #include "llvm/Transforms/Scalar/Reassociate.h"
 
 #include <memory>
+#include <vector>
 
 struct Scaffold;
+class List;
 
 namespace llvm
 {
@@ -52,19 +57,20 @@ typedef std::function<llvm::Value *(llvm::Value *)> validatorFunction;
 
 class Compiler
 {
-    // Scaffold is a collection of objects needed to compile a JIT module.
-    Scaffold *scaff;
+    // Scaffold is a collection of objects needed to compile a function (JIT module).
+    Scaffold *scaff_;
 
-    // a pointer to the Evaluator object that supports execution of the compiled function.
-    llvm::Value *evaluator;
+    std::unique_ptr<llvm::orc::LLJIT> lljit_;
 
-    // a pointer to the block ID argument of the compiled function.
-    llvm::Value *blockId;
+    // Weak refs so shutdown can release ResourceTrackers while LLJIT is still alive.
+    static std::vector<std::weak_ptr<CompiledText>> liveCompiledTexts_;
 
-    std::unique_ptr<llvm::orc::LLJIT> lljit;
+    static void trackCompiledText(const std::shared_ptr<CompiledText> &compiledText);
 
-    // The hash table of compiled texts referenced by lists or ASTNodes.
-    static QHash<Datum *, std::shared_ptr<CompiledText>> compiledTextTable;
+    /// @brief Procedure-body suffix whose head is the line currently being compiled.
+    /// @details Used when registering TAG locations so GOTO can jump to the correct line.
+    /// Must be set by the caller of compiledTextFromList() when compiling a procedure line.
+    DatumPtr tagLineLocation_;
 
     // Child node generation.
 
@@ -96,11 +102,6 @@ class Compiler
     // Generate code for the child node at the given index and cast it to the requested data type.
     llvm::Value *generateChild(ASTNode *parent, unsigned int index, RequestReturnType);
 
-    // Generate a call to an external function
-    llvm::Value *generateExternFunctionCall(llvm::Type *returnType,
-                                            const std::string &name,
-                                            const std::vector<std::pair<llvm::Type *, llvm::Value *>> &args);
-
     // Generate a query to return a datum type (isa) of a given object.
     llvm::Value *generateGetDatumIsa(llvm::Value *objAddr);
 
@@ -109,6 +110,10 @@ class Compiler
 
     // Generate a void return value using the ASTNode to represent the source (for blame).
     llvm::Value *generateVoidRetval(const DatumPtr &node);
+
+    // Ensure coroutine frame exists (create once per function if needed). Returns handle; use before
+    // control flow that may take a path with no suspend so the handle is defined on all paths.
+    llvm::Value *ensureCoroutineFrame();
 
     // Generate a call to execute a list.
     llvm::Value *generateCallList(llvm::Value *list, RequestReturnType returnType);
@@ -136,6 +141,9 @@ class Compiler
 
     // Generate a call to construct error: "X has no value"
     llvm::Value *generateErrorNoValue(llvm::Value *what);
+
+    // Generate a call to construct error: "Graphics not initialized"
+    llvm::Value *generateErrorNoGraphics();
 
     // Generate a call to construct error: "Not enough inputs to X"
     llvm::Value *generateErrorNotEnoughInputs(ASTNode *x);
@@ -226,8 +234,8 @@ class Compiler
     // Group consecutive expressions of the same type (tag or non-tag) together.
     QList<QList<DatumPtr>> groupConsecutiveExpressions(const QList<DatumPtr> &expressions);
 
-    // Get the compiled function pointer for a list of ASTNodes.
-    CompiledFunctionPtr generateFunctionPtrFromASTList(QList<QList<DatumPtr>> parsedList, Datum *key);
+    // Compile a list of ASTNode trees into a new CompiledText (JIT module) and store it on aList.
+    std::shared_ptr<CompiledText> generateFunctionPtrFromASTList(QList<QList<DatumPtr>> parsedList, List *aList);
 
     // Generate a number array from a datum.
     llvm::AllocaInst *generateNumberAryFromDatum(ASTNode *parent, llvm::Value *src);
@@ -244,13 +252,14 @@ class Compiler
     // Generate the TagId-to-Block Table of Contents.
     llvm::BasicBlock *generateTOC(QList<llvm::BasicBlock *> blocks, llvm::Function *theFunction);
 
+    // Generate a return operation for the function.
+    void generateReturn(llvm::Value *retval);
+
+    // Generate the wrapup code for the function.
+    void generateWrapup();
+
     /// @brief Private constructor for singleton pattern.
     Compiler();
-
-    Compiler(const Compiler &) = delete;
-    Compiler(Compiler &&) = delete;
-    Compiler &operator=(const Compiler &) = delete;
-    Compiler &operator=(Compiler &&) = delete;
 
   public:
     /// @brief Get the singleton instance of the Compiler class.
@@ -261,14 +270,27 @@ class Compiler
         return instance;
     }
 
+    Compiler(const Compiler &) = delete;
+    Compiler(Compiler &&) = delete;
+    Compiler &operator=(const Compiler &) = delete;
+    Compiler &operator=(Compiler &&) = delete;
+
     /// @brief Destructor.
     ~Compiler();
 
-    /// Get the compiled function pointer for a list.
-    CompiledFunctionPtr functionPtrFromList(List *aList);
+    /// Get the compiled text for a list (compiling if stale or missing).
+    std::shared_ptr<CompiledText> compiledTextFromList(List *aList);
 
-    /// Destroy the compiled text for a datum (either a List or an ASTNode).
-    static void destroyCompiledTextForDatum(Datum *aDatum);
+    /// @brief Set the procedure-body suffix for TAG registration during the next compile.
+    /// @param location List whose head is the line being compiled; tail is the remaining body.
+    void setTagLineLocation(const DatumPtr &location) { tagLineLocation_ = location; }
+
+    /// @brief Clear the TAG registration line location after compiling.
+    void clearTagLineLocation() { tagLineLocation_ = nothing(); }
+
+    /// Release JIT resources for all live CompiledText.
+    /// Safe to call during shutdown; does not require walking every List.
+    static void releaseAllCompiledText();
 
     // The generators for the different ASTNodes. Since this list changes often during development
     // and it needs to be consistent across several files, we keep the master list in the compiler
@@ -296,6 +318,43 @@ class Compiler
     llvm::Value *genLiteral(const DatumPtr &node, RequestReturnType returnType);
 
     llvm::Value *genExecProcedure(const DatumPtr &node, RequestReturnType returnType);
-};
+
+    // Typed wrapper: derives LLVM types from C function signature for single-source-of-truth verification.
+    template <typename Ret, typename... Args>
+    llvm::Value *generateCallExternTyped(Ret (*)(Args...),
+                                        const std::string &name,
+                                        const std::vector<std::pair<llvm::Type *, llvm::Value *>> &args)
+    {
+        llvm::LLVMContext &ctx = *scaff_->theContext_;
+        llvm::Type *retType = CTypeToLLVM<Ret>::get(ctx);
+        std::vector<llvm::Type *> paramTypes;
+        std::vector<llvm::Value *> argsV;
+        paramTypes.reserve(sizeof...(Args));
+        argsV.reserve(args.size());
+
+        Q_ASSERT(static_cast<size_t>(args.size()) == sizeof...(Args));
+        for (size_t i = 0; i < args.size(); ++i)
+        {
+            paramTypes.push_back(args[i].first);
+            argsV.push_back(args[i].second);
+            Q_ASSERT(args[i].first == paramTypes[i]);
+        }
+
+        llvm::FunctionType *fType = llvm::FunctionType::get(retType, paramTypes, false);
+        llvm::FunctionCallee calleeF = scaff_->theModule_->getOrInsertFunction(name, fType);
+
+        Q_ASSERT(calleeF.getFunctionType()->getNumParams() == argsV.size());
+
+        if (retType->isVoidTy())
+            return scaff_->builder_.CreateCall(calleeF, argsV);
+        else
+            return scaff_->builder_.CreateCall(calleeF, argsV, name + "_result");
+    }
+    
+}; // class Compiler
+
+#define generateCallExtern(FUNC, ...) \
+generateCallExternTyped(FUNC, #FUNC, {__VA_ARGS__})
+
 
 #endif // COMPILER_H

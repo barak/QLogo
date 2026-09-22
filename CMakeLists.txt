@@ -4,6 +4,8 @@ project(QLogo VERSION 0.961 LANGUAGES CXX C)
 
 include(GNUInstallDirs)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(QLOGO_BIN qlogo)
 set(QLOGO_GUI Psychi)
 set(QLOGO_HELP qlogo_help.db)
@@ -13,16 +15,17 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 if (CMAKE_BUILD_TYPE)
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
-        set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
+        if(APPLE)
+            set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
+        endif()
+    elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_compile_definitions(QLOGO_DEBUG)
     endif()
 endif()
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
-
-# Add debugging flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -57,17 +60,19 @@ install(DIRECTORY "${QLOGO_DATA_DIR}"
     DESTINATION "${CMAKE_INSTALL_DATADIR}" 
 )
 
-install(FILES "${QLOGO_GUI}.desktop"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
-)
+if(UNIX AND NOT APPLE)
+    install(FILES "${QLOGO_GUI}.desktop"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
+    )
 
-install(DIRECTORY "icons/hicolor"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/icons"
-)
+    install(DIRECTORY "icons/hicolor"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons"
+    )
 
-install(FILES "${QLOGO_GUI}.appdata.xml"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo"
-)
+    install(FILES "${QLOGO_GUI}.appdata.xml"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo"
+    )
+endif()
 
 if (APPLE)
     set(MACOSX_BUNDLE_ICON_FILE ${QLOGO_GUI}.icns)

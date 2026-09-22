@@ -28,10 +28,10 @@ class TextStream;
 /// astFromList(), which is used to treeify a QLogo list into an Abstract Syntax Tree.
 class Treeifier
 {
-    DatumPtr currentToken;
+    DatumPtr currentToken_;
 
     void advanceToken();
-    List *listIter;
+    List *listIter_;
 
     DatumPtr treeifyRootExp();
     DatumPtr treeifyExp();
@@ -45,12 +45,15 @@ class Treeifier
     Treeifier() = default;
 
     ~Treeifier() = default;
-    Treeifier(const Treeifier &) = delete;
-    Treeifier(Treeifier &&) = delete;
-    Treeifier &operator=(const Treeifier &) = delete;
-    Treeifier &operator=(Treeifier &&) = delete;
-
   public:
+
+    // Deleted operators to prevent copying.
+    Treeifier(const Treeifier &) = delete;
+    Treeifier(Treeifier *) = delete;
+    Treeifier &operator=(const Treeifier &) = delete;
+    Treeifier &operator=(Treeifier *) = delete;
+    Treeifier(Treeifier &&) = delete;
+    Treeifier &operator=(Treeifier &&) = delete;
 
     /// @brief Treeify a QLogo list into a list of Abstract Syntax Trees.
     /// @param aList The list to treeify.

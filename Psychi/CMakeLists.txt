@@ -2,7 +2,7 @@
 # but on MacOS I want to put them into the QLOGO_GUI bundle.
 set(RESOURCE_FILES
   ${CMAKE_SOURCE_DIR}/share/qlogo_help.db
-  ${CMAKE_SOURCE_DIR}/share/qlogo_lib.db
+  ${CMAKE_SOURCE_DIR}/share/qlogo_library.db
 )
 set(GUI_SOURCES
   canvas.cpp
@@ -23,15 +23,7 @@ set(GUI_SOURCES
 
 find_package(Qt6 REQUIRED COMPONENTS Sql)
 
-set(MACOSX_BUNDLE_ICON_FILE "${QLOGO_GUI}.icns")
-
-set(app_icon_macos "${CMAKE_SOURCE_DIR}/icons/${QLOGO_GUI}.icns")
-
-set_source_files_properties(${app_icon_macos} PROPERTIES
-    MACOSX_PACKAGE_LOCATION "Resources")
-
-
-if (WIN32)
+if(WIN32)
     file(COPY "${CMAKE_SOURCE_DIR}/icons/${QLOGO_GUI}.ico"
     DESTINATION  "${CMAKE_SOURCE_DIR}/resources")
     set(app_icon_resource_windows "${CMAKE_SOURCE_DIR}/resources/${QLOGO_GUI}.rc")
@@ -39,19 +31,24 @@ if (WIN32)
       ${GUI_SOURCES}
       ${app_icon_resource_windows}
     )
-else()
+elseif(APPLE)
+    set(MACOSX_BUNDLE_ICON_FILE "${QLOGO_GUI}.icns")
+    set(app_icon_macos "${CMAKE_SOURCE_DIR}/icons/${QLOGO_GUI}.icns")
+    set_source_files_properties(${app_icon_macos} PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources")
     qt_add_executable("${QLOGO_GUI}" MACOSX_BUNDLE
       ${GUI_SOURCES}
       ${app_icon_macos}
     )
+else()
+    qt_add_executable("${QLOGO_GUI}"
+      ${GUI_SOURCES}
+    )
 endif()
-
-
 
 target_include_directories("${QLOGO_GUI}" PUBLIC
   "${CMAKE_SOURCE_DIR}/include"
 )
-
 
 target_link_libraries("${QLOGO_GUI}" PRIVATE
     Qt6::Widgets
@@ -59,12 +56,38 @@ target_link_libraries("${QLOGO_GUI}" PRIVATE
     Qt6::Sql
 )
 
-set_target_properties("${QLOGO_GUI}" PROPERTIES
-  MACOSX_BUNDLE_GUI_IDENTIFIER jason.qlogo.org
-  MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
-  MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
-  MACOSX_BUNDLE TRUE
-  WIN32_EXECUTABLE TRUE
-  RESOURCE "${RESOURCE_FILES}"
-)
+if(APPLE)
+  set_target_properties("${QLOGO_GUI}" PROPERTIES
+    MACOSX_BUNDLE_GUI_IDENTIFIER jason.qlogo.org
+    MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+    MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
+    MACOSX_BUNDLE TRUE
+    RESOURCE "${RESOURCE_FILES}"
+  )
+elseif(WIN32)
+  set_target_properties("${QLOGO_GUI}" PROPERTIES
+    WIN32_EXECUTABLE TRUE
+  )
+endif()
+
+if(WIN32)
+  get_target_property(_psychi_qmake_location Qt6::qmake IMPORTED_LOCATION)
+  get_filename_component(_psychi_qt_bin_dir "${_psychi_qmake_location}" DIRECTORY)
+  find_program(WINDEPLOYQT_EXECUTABLE
+    NAMES windeployqt windeployqt6
+    HINTS "${_psychi_qt_bin_dir}"
+    REQUIRED
+  )
+  add_custom_command(TARGET "${QLOGO_GUI}" POST_BUILD
+    COMMAND
+      "${CMAKE_COMMAND}" -E env
+      "PATH=${_psychi_qt_bin_dir};$ENV{PATH}"
+      "${WINDEPLOYQT_EXECUTABLE}"
+      "$<IF:$<CONFIG:Debug>,--debug,--release>"
+      --no-translations
+      "$<TARGET_FILE:${QLOGO_GUI}>"
+    COMMENT "Deploying Qt runtime for ${QLOGO_GUI}"
+    VERBATIM
+  )
+endif()
 

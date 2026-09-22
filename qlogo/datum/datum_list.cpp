@@ -16,16 +16,14 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "compiler.h"
 #include "datum_types.h"
-#include "treeifyer.h"
 #include "workspace/visited.h"
 #include <QObject>
 #include <qdebug.h>
 
 List::List(const DatumPtr &item, List *srcList)
 {
-    isa = Datum::typeList;
+    isa_ = Datum::typeList;
     head = item;
     tail = DatumPtr(srcList);
 }
@@ -41,7 +39,7 @@ List::~List()
         // Destructors must not throw exceptions. Log the error and continue.
         // The collection removal may have failed, but we still need to complete
         // the destruction of this object.
-        qDebug() << "Exception caught in List destructor during cleanup";
+        qInfo() << "Exception caught in List destructor during cleanup";
     }
 }
 
@@ -120,8 +118,7 @@ void List::clear()
     Q_ASSERT(this != EmptyList::instance());
     head = nothing();
     tail = nothing();
-    if (compileTimeStamp > 0)
-        Compiler::destroyCompiledTextForDatum(this);
+    compiledText_.reset();
     compileTimeStamp = 0;
 }
 
@@ -158,7 +155,7 @@ EmptyList *EmptyList::instance_ = nullptr;
 
 EmptyList::EmptyList() : List(nothing(), nullptr)
 {
-    isa = Datum::typeEmptyList;
+    isa_ = Datum::typeEmptyList;
 }
 
 EmptyList *EmptyList::instance()
