@@ -1,14 +1,27 @@
-qlogo (0.961-2) UNRELEASED; urgency=medium
+qlogo (1.0-1) unstable; urgency=medium
 
-  * Bump policy
+  * New upstream release
+  * Bump policy, debhelper compat level 14
   * uscan v5 debian/watch file
   * track upstream
     - build dependency on llvm-XX-dev
     - QLogo-GUI moved to Psychi
-    - README.md moved to README.org
     - desktop file name change
+    - README moved to README.md
+    - build dependency on libncurses-dev for new curses text interface
+    - drop obsolete build dependency on libqt6opengl6-dev
+    - upstream now ships man pages; add them as alternatives dependents,
+      and link Psychi.1 to upstream psychi.1
+    - do not install upstream license files into doc directory
+    - update debian/copyright following upstream COPYRIGHT
+  * Patch to pass Debian upstream version for QLOGOVERSION, avoiding
+    "git describe"
+  * Run upstream console test suite during build
+  * Depend on libqt6sql6-sqlite, needed at runtime to read the help and
+    library databases
+  * gbp.conf: packaging branch is now debian-dev
 
- -- Barak A. Pearlmutter <bap@debian.org>  Wed, 25 Feb 2026 12:45:34 +0000
+ -- Barak A. Pearlmutter <bap@debian.org>  Sun, 08 Nov 2026 19:29:56 +0000
 
 qlogo (0.961-1) unstable; urgency=medium
 

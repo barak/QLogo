@@ -1,0 +1,41 @@
+From: "Barak A. Pearlmutter" <bap@debian.org>
+Date: Sun, 8 Nov 2026 19:19:02 +0000
+Subject: Allow QLOGO_VERSION to be set on the cmake command line
+
+Forwarded: no
+
+The QLOGOVERSION Logo variable is taken from "git describe", which
+yields "unknown" when building from a tarball and an unrelated
+packaging tag when building inside a packaging git repository.  Allow
+the builder to set it explicitly with -DQLOGO_VERSION=...
+---
+ CMakeLists.txt | 16 +++++++++-------
+ 1 file changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index dd5916f..ebdfa5e 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -35,13 +35,15 @@ if(NOT QLOGO_CSLS_FILES)
+     message(FATAL_ERROR "No CSLS files found in ${QLOGO_CSLS_SRC}")
+ endif()
+ 
+-execute_process(
+-    COMMAND git describe --tags
+-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+-    OUTPUT_VARIABLE QLOGO_VERSION
+-    OUTPUT_STRIP_TRAILING_WHITESPACE
+-    ERROR_QUIET
+-)
++if(NOT QLOGO_VERSION)
++    execute_process(
++        COMMAND git describe --tags
++        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
++        OUTPUT_VARIABLE QLOGO_VERSION
++        OUTPUT_STRIP_TRAILING_WHITESPACE
++        ERROR_QUIET
++    )
++endif()
+ if(NOT QLOGO_VERSION)
+     set(QLOGO_VERSION "unknown")
+ endif()

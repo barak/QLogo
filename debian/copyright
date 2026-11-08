@@ -1,29 +1,55 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: QLogo
+Upstream-Contact: Jason Sikes <sikes@qlogo.org>
 Source: https://github.com/jasonsikes/QLogo
+Comment:
+ QLogo and Psychi are BSD-3-Clause.  The help documentation and the
+ Logo library, embedded in qlogo/compiler/compiler*.cpp and in csls/,
+ derive from UCBLogo by Brian Harvey and are GPL-3.0-only, as are the
+ qlogo_help.db and qlogo_library.db databases generated from them.
 
 Files: *
 Copyright:
-    2017–2024, Jason Sikes <sikes@acm.org>
-License: 3BSD
+    2017–2026, Jason Sikes <sikes@qlogo.org>
+License: BSD-3-Clause
 
-Files: share/qlogo_*
+Files: qlogo/compiler/compiler*.cpp
 Copyright:
-    1993–2008, Regents of the University of California
-    2017–2024, Jason Sikes <sikes@acm.org>
-License: GPL-3+
-Comment: LICENSE
- The help and library texts included in this package derive from UCBLogo under
- terms of the GNU General Public License as published by the Free
- Software Foundation, version 3.
+    2017–2026, Jason Sikes <sikes@qlogo.org>
+    Brian Harvey and the Regents of the University of California
+License: BSD-3-Clause and GPL-3.0-only
+Comment:
+ The C++ implementation in these files is BSD-3-Clause.
+ The /***DOC ... COD***/ help text and the /***LIB ... BIL***/ Logo
+ library procedures embedded in them are GPL-3.0-only.
+
+Files: csls/*
+Copyright:
+    Brian Harvey and the Regents of the University of California
+License: GPL-3.0-only
+Comment:
+ Logo programs from the Computer Science Logo Style library, as shipped
+ with UCBLogo, with later modifications.
+
+Files: org.qlogo.Psychi.metainfo.xml
+Copyright:
+    2017–2026, Jason Sikes <sikes@qlogo.org>
+License: CC0-1.0
+
+Files: LICENSES/GPL-3.0-only.txt
+Copyright:
+    2007, Free Software Foundation, Inc.
+License: Verbatim
+ Everyone is permitted to copy and distribute verbatim copies of this
+ license document, but changing it is not allowed.
 
 Files: debian/*
 Copyright:
-    2018–2024, Barak A. Pearlmutter <bap@debian.org>
+    2018–2026, Barak A. Pearlmutter <bap@debian.org>
 License: Public-Domain
  This material is hereby released to the public domain.
 
-License: 3BSD
+License: BSD-3-Clause
  Redistribution and use in source and binary forms, with or without
  modification, are permitted provided that the following conditions
  are met:
@@ -52,11 +78,10 @@ License: 3BSD
  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  POSSIBILITY OF SUCH DAMAGE.
 
-License: GPL-3+
- This program is free software; you can redistribute it and/or modify
+License: GPL-3.0-only
+ This program is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
- the Free Software Foundation; either version 3, or (at your option)
- any later version.
+ the Free Software Foundation, version 3.
  .
  This program is distributed in the hope that it will be useful, but
  WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -65,3 +90,12 @@ License: GPL-3+
  .
  On Debian systems, the complete text of the GNU General
  Public License version 3 can be found in "/usr/share/common-licenses/GPL-3".
+
+License: CC0-1.0
+ To the extent possible under law, the author(s) have dedicated all
+ copyright and related and neighboring rights to this software to the
+ public domain worldwide.  This software is distributed without any
+ warranty.
+ .
+ On Debian systems, the complete text of the CC0 1.0 Universal license
+ can be found in "/usr/share/common-licenses/CC0-1.0".
