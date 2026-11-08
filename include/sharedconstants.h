@@ -42,6 +42,8 @@ enum messageCategory : message_t
     W_CLOSE_PIPE,           // The interpreter tells the GUI to close the iter-process pipe
     W_SET_SCREENMODE,       // Set the screenmode (splitscreen, fullscreen, textscreen)
     W_FILE_DIALOG_GET_PATH, // Query user for a file path using modal file dialog.
+    W_TIMER_START,          // QLogo asks Psychi to start a WAIT timer (qint32 msecs)
+    W_TIMER_END,            // Psychi reports that the WAIT timer fired
 
     S_SYSTEM,   // SYSTEM signal (End everything)
     S_TOPLEVEL, // TOPLEVEL signal (End currently-running procedure, drop back to prompt)
@@ -54,8 +56,8 @@ enum messageCategory : message_t
     C_CONSOLE_CHAR_READ,           // A char returned from the GUI
     C_CONSOLE_SET_FONT_NAME,       // Set the console font name
     C_CONSOLE_SET_FONT_SIZE,       // Set the console font size
-    C_CONSOLE_BEGIN_EDIT_TEXT,     // Open the text editor window
-    C_CONSOLE_END_EDIT_TEXT,       // Text editor has finished
+    C_CONSOLE_BEGIN_EDIT_TEXT,     // Open the editor: QString title, QString startingText
+    C_CONSOLE_END_EDIT_TEXT,       // Editor finished: bool accepted, QString text
     C_CONSOLE_TEXT_CURSOR_POS,     // Position of text cursor (row,col)
     C_CONSOLE_SET_TEXT_CURSOR_POS, // Set text cursor position
     C_CONSOLE_SET_CURSOR_MODE,     // Set text cursor insert/overwrite
@@ -85,6 +87,9 @@ enum messageCategory : message_t
     C_CANVAS_MOUSE_MOVED,           // Mouse moved over the canvas
     C_CANVAS_MOUSE_BUTTON_UP,       // A mouse button was released
     C_CANVAS_SET_PENMODE,           // Set canvas pen mode
+    C_CONSOLE_KEY_EVENT,            // Character key while Logo is not reading a line or char
+    C_CANVAS_SET_PENPATTERN,        // Set pen style, cap, join, and optional dash pattern
+    C_CANVAS_SET_SCRUNCH,           // Set X and Y scrunch (display scale) factors
 };
 
 /// @brief The configuration for the qlgog/Psychi programs.
@@ -110,12 +115,11 @@ class Config
     Config &operator=(Config &&) = delete;
 
 #ifdef DEBUG
-const bool debugBuild_ = true;
+    const bool debugBuild_ = true;
 #else
-const bool debugBuild_ = false;
+    const bool debugBuild_ = false;
 #endif
-    
-    
+
     /// @brief Get the singleton instance of the Config class.
     /// @return The singleton instance of the Config class.
     static Config &get()
@@ -127,7 +131,10 @@ const bool debugBuild_ = false;
     /// The escape character is the separator between Console messages and
     /// Console control characters. Currently, the only control is switching
     /// STANDOUT modes.
-    const QChar escapeChar_ = QChar(27);
+    ///
+    /// ASCII 1 (SOH) is not in the raw-to-printable map, so printing leaves it
+    /// unchanged and the console can strip it.
+    const QChar escapeChar_ = QChar(1);
 
     /// @brief The escape string is the escape character as a string.
     const QString escapeString_ = QString(escapeChar_);
@@ -170,14 +177,11 @@ const bool debugBuild_ = false;
     // Set to true iff qlogo is communicating with Psychi.
     bool hasGUI_ = false;
 
-    // Set to true iff compiler should show IR code.
-    bool showIR_ = false;
+    // Set to true iff qlogo is using the ncurses text user interface.
+    bool hasTUI_ = false;
 
-    // Set to true iff compiler should show the CFG view.
-    bool showCFG_ = false;
-
-    // Set to true iff compiler should show the full module IR (after coroutine lowering).
-    bool showModuleIR_ = false;
+    // Set to true iff the user forbade the ncurses text user interface.
+    bool noTUI_ = false;
 
     // Set to true if evaluator should trace its execution (for debugging).
     bool traceEvaluator_ = false;
@@ -194,11 +198,26 @@ const bool debugBuild_ = false;
     // ARGV initialization parameters
     QStringList ARGV_;
 
+    /// @brief Logo file to run before the interactive prompt, if any.
+    /// @details Empty when no positional script was given before a lone hyphen.
+    /// A hyphen and the words after it are COMMAND.LINE, not scripts. Further
+    /// positional arguments before the hyphen are not additional scripts.
+    QString startupScriptPath_;
+
     /// @brief The path to the library database file.
     QString paramLibraryDatabaseFilepath_;
 
     /// @brief The path to the help database file.
     QString paramHelpDatabaseFilepath_;
+
+    /// @brief Override for the CSLS directory from --setcslsloc.
+    /// @details Empty means search the CSLS environment variable, then the
+    /// default data locations used by the library and help databases.
+    QString paramCslsDirectory_;
+
+    /// @brief The resolved CSLS directory path.
+    /// @details Empty if no override was given and no default directory was found.
+    QString cslsDirectory_;
 
     // TODO: These should be set in the CMake file
 
@@ -207,6 +226,9 @@ const bool debugBuild_ = false;
 
     /// @brief The default help database filename.
     const char *defaultHelpDbFilename_ = "qlogo_help.db";
+
+    /// @brief The default CSLS directory name relative to the data location.
+    const char *defaultCslsDirName_ = "csls";
 };
 
 enum PenModeEnum

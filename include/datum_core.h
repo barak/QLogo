@@ -23,7 +23,6 @@ class Datum
     Datum();
 
   public:
-
     /// @brief Value stored in isa.
     enum DatumType : uint32_t
     {
@@ -31,6 +30,7 @@ class Datum
         typeWord = 0x00000001,
         typeList = 0x00000002,
         typeArray = 0x00000004,
+        typePersistentWord = 0x00010001, // Persistent Word (true/false, interned variable names)
         typeEmptyList = 0x00010002,      // Singleton instance of EmptyList
         typeDataMask = 0x00000007,       // Word + List + Array
         typeWordOrListMask = 0x00000003, // Word + List
@@ -64,6 +64,15 @@ class Datum
     ///
     /// @return A pointer to the singleton Datum instance.
     static Datum *notADatum();
+
+    /// @brief Number of Datum objects currently allocated.
+    static int countOfNodes();
+
+    /// @brief High-water mark of Datum objects since the last NODES, or session start.
+    static int maxCountOfNodes();
+
+    /// @brief Set the high-water mark to the current allocation count.
+    static void resetMaxCountOfNodes();
 
     // Deleted operators because Datums are not relocatable.
     // Their addresses are used as key values for mapping operations.

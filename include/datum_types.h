@@ -36,6 +36,8 @@ class Word : public Datum
     mutable QString printableString;
     mutable double number;
     mutable bool boolean;
+    /// @brief Canonical variable-name word for this spelling, once resolved.
+    mutable Word *interned_ = nullptr;
     bool sourceIsNumber;
 
     void genRawString() const;
@@ -92,6 +94,41 @@ class Word : public Datum
     {
         return sourceIsNumber;
     }
+
+    /// @brief The one persistent Word for this word's canonical variable name.
+    ///
+    /// @details The first call builds the key string and returns the shared word
+    /// for that spelling. Later calls return the same pointer. "x" and "X"
+    /// resolve to one word. The result stays alive for the session.
+    /// @return The interned name word.
+    Word *interned() const;
+
+    /// @brief The persistent Word for an already-canonical variable name.
+    ///
+    /// @param key The spelling previously used as a variable-table key: the
+    /// uppercased printable form from toString(ToStringFlags_Key), or a
+    /// SpecialVars::name spelling.
+    /// @return The interned name word. The same key returns the same pointer.
+    static Word *internKey(const QString &key);
+
+    /// @brief Return the interned Word for Logo TRUE ("true").
+    static Word *trueWord();
+
+    /// @brief Return the interned Word for Logo FALSE ("false").
+    static Word *falseWord();
+
+    /// @brief Return the interned Word for the given boolean value.
+    ///
+    /// @param value True to return trueWord(), false to return falseWord().
+    /// @return The interned true or false Word.
+    static Word *forBool(bool value)
+    {
+        return value ? trueWord() : falseWord();
+    }
+
+  private:
+    /// @brief Allocate an interned true or false Word and mark it as a valid boolean.
+    static Word *createInternedBool(bool value);
 };
 
 /// @brief The container that allows efficient read and write access to its elements.

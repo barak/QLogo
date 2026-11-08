@@ -4,8 +4,8 @@
 Generate C++ header and mapping files for QLogo primitive function declarations.
 
 This script generates the primitive mapping files used by the compiler:
-- include/primitives.h (function declarations)
-- include/workspace/primitivetable.h (mapping table)
+- include/primitives.inc (function declarations)
+- include/workspace/primitivetable.inc (mapping table)
 
 Usage:
     generate_primitive_mappings.py
@@ -27,8 +27,8 @@ from command_parser import (
 # Configuration
 # ============================================================================
 
-PRIMITIVE_HEADER = "include/primitives.h"
-PRIMITIVE_MAPPINGS = "include/workspace/primitivetable.h"
+PRIMITIVE_HEADER = "include/primitives.inc"
+PRIMITIVE_MAPPINGS = "include/workspace/primitivetable.inc"
 NAMESPACE_NAME = "StringConstants"
 
 
@@ -76,7 +76,7 @@ def write_primitive_entries(entries, method, header_file, table_file):
     """
     # Write method declaration to header (once per method)
     header_file.write(
-        f"llvm::Value *{method}(const DatumPtr &node, RequestReturnType returnType);\n"
+        f"llvm::Value *{method}(const DatumPtr &node, TypeMask expected);\n"
     )
     
     # Write mapping entries to table (one per command name)

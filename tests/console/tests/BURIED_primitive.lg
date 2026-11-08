@@ -1,0 +1,5 @@
+bury "print
+show memberp "PRINT first buried
+show memberp "CASEIGNOREDP item 2 buried
+show memberp "UNBURYONEDIT item 2 buried
+show buriedp "print

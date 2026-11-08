@@ -1,10 +1,14 @@
-//===-- qlogo/datastructureprimitives.cpp - Data structure implementations -------*- C++ -*-===//
+//===-- compiler/compiler_datastructureprimitives.cpp - Data structure implementations -------*- C++ -*-===//
 //
-// Copyright 2017-2024 Jason Sikes
+// Copyright 2017-2026 Jason Sikes
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted under the conditions specified in the
 // license found in the LICENSE file in the project root.
+//
+// The /***DOC ... COD***/ help text and the /***LIB ... BIL***/ Logo
+// library procedures in this file are licensed separately under the
+// GNU General Public License, version 3 only. See the COPYRIGHT file.
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -16,132 +20,82 @@
 
 #include "astnode.h"
 #include "compiler.h"
-#include "compiler_internal.h"
 #include "datum_types.h"
-#include "workspace/exports.h"
-#include "workspace/kernel.h"
 #include "sharedconstants.h"
-#include "workspace/visited.h"
 #include "workspace/callframe.h"
+#include "workspace/exports.inc"
+#include "workspace/kernel.h"
 
 using namespace llvm;
 using namespace llvm::orc;
-/// @brief Determine if the given Datums are equal, according to `EQUALP` help text.
-/// @param visited The set of visited nodes.
-/// @param d1 The first Datum to compare.
-/// @param d2 The second Datum to compare.
-/// @param cs The case sensitivity to use for the comparison.
-/// @returns true if the Datums are equal, false otherwise.
-bool areDatumsEqual(VisitedMap &visited, Datum *d1, Datum *d2, Qt::CaseSensitivity cs)
+
+Value *Compiler::generateNotEmptyFromDatum(ASTNode *parent, Value *src, Datum::DatumType typeMask)
 {
-    if (d1 == d2)
-        return true;
-    if (d1->isa_ != d2->isa_)
-        return false;
+    auto validator = [this, typeMask](Value *candidate) {
+        BasicBlock *startBB = scaff_->builder_.GetInsertBlock();
+        BasicBlock *okTypeBB = scaff_->createBasicBlock(DBG_NAME("okTypeBlock"));
+        BasicBlock *endBB = scaff_->createBasicBlock(DBG_NAME("endBlock"));
 
-    if (d1->isWord())
+        Value *isa = generateGetDatumIsa(candidate);
+        Value *maskCalc = scaff_->builder_.CreateAnd(isa, CoInt32(typeMask), DBG_NAME("maskCalc"));
+        Value *okType = scaff_->builder_.CreateICmpNE(maskCalc, CoInt32(0), DBG_NAME("okType"));
+        scaff_->builder_.CreateCondBr(okType, okTypeBB, endBB);
+
+        scaff_->builder_.SetInsertPoint(okTypeBB);
+        Value *isEmpty = generateCallExtern(isDatumEmpty, PaAddr(candidate));
+        Value *notEmpty = scaff_->builder_.CreateICmpEQ(isEmpty, CoBool(false), DBG_NAME("isDatumEmptyCond"));
+        scaff_->builder_.CreateBr(endBB);
+
+        scaff_->builder_.SetInsertPoint(endBB);
+        PHINode *phi = scaff_->builder_.CreatePHI(okType->getType(), 2, DBG_NAME("notEmptyResult"));
+        phi->addIncoming(notEmpty, okTypeBB);
+        phi->addIncoming(okType, startBB);
+        return phi;
+    };
+    return generateValidationDatum(parent, src, validator);
+}
+
+Value *Compiler::generateSingleCharWordFromDatum(ASTNode *parent, Value *src)
+{
+    return generateValidationDatum(parent, src, [this](Value *candidate) {
+        Value *isGoodChar = generateCallExtern(isSingleCharWord, PaAddr(candidate));
+        return scaff_->builder_.CreateICmpEQ(isGoodChar, CoBool(true), DBG_NAME("isGoodCond"));
+    });
+}
+
+Value *Compiler::generateVariadicConstruct(const DatumPtr &node,
+                                           addr_t (*ctor)(addr_t, addr_t, uint32_t) noexcept,
+                                           const std::string &ctorName,
+                                           const std::string &aryName,
+                                           bool requireWords)
+{
+    CallSite cs(this, node, TypeDatum);
+    AllocaInst *ary;
+    if (requireWords)
     {
-        Word *w1 = d1->wordValue();
-        Word *w2 = d2->wordValue();
-        if (w1->isSourceNumber() || w2->isSourceNumber())
-            return w1->numberValue() == w2->numberValue();
-
-        return w1->toString().compare(w2->toString(), cs) == 0;
-    }
-    else if (d1->isList())
-    {
-        // If we have seen this list before,
-        if (visited.contains(d1))
-        {
-            // Then return true if the comparison is the same as the previous comparison.
-            return visited.get(d1) == d2;
-        }
-
-        List *l1 = d1->listValue();
-        List *l2 = d2->listValue();
-
-        while (l1 != EmptyList::instance() && l2 != EmptyList::instance())
-        {
-            if (!areDatumsEqual(visited, l1->head.datumValue(), l2->head.datumValue(), cs))
-                return false;
-            visited.add(l1, l2);
-            l1 = l1->tail.listValue();
-            l2 = l2->tail.listValue();
-        }
-
-        return l1 && l2 && l1->isEmpty() && l2->isEmpty();
-    }
-    else if (d1->isArray())
-    {
-        // Arrays are equal iff they are the same array, which would have
-        // passed the "datum1 == datum2" test at the beginning.
-        return false;
+        std::vector<Value *> words;
+        words.reserve(cs.count());
+        for (Value *child : cs.children())
+            words.push_back(generateWordFromDatum(node.astnodeValue(), child));
+        ary = generateAllocaAry(words, aryName);
     }
     else
     {
-        Q_ASSERT(false);
+        ary = cs.allocaAry(aryName);
     }
-    return false;
+    Value *retval =
+        generateCallExternTyped(ctor, ctorName, {PaAddr(scaff_->evaluator_), PaAddr(ary), PaInt32(allocaN(ary))});
+    endAllocaLifetime(ary);
+    return cs.ret(retval);
 }
-Value *Compiler::generateNotEmptyWordOrListFromDatum(ASTNode *parent, Value *src)
+
+Value *Compiler::generateEqualpCompare(Value *thing1, Value *thing2)
 {
-    auto validator = [this](Value *wordorlist) {
-        BasicBlock *startBB = scaff_->builder_.GetInsertBlock();
-
-        BasicBlock *wordOrListBB = scaff_->createBasicBlock(DBG_NAME("wordOrListBlock"));
-        BasicBlock *endBB = scaff_->createBasicBlock(DBG_NAME("endBlock"));
-
-        Value *wordOrListType = generateGetDatumIsa(wordorlist);
-        Value *maskCalc =
-            scaff_->builder_.CreateAnd(wordOrListType, CoInt32(Datum::typeWord | Datum::typeList), DBG_NAME("maskCalc"));
-        Value *wordOrListCond = scaff_->builder_.CreateICmpNE(maskCalc, CoInt32(0), DBG_NAME("wordOrListCond"));
-        scaff_->builder_.CreateCondBr(wordOrListCond, wordOrListBB, endBB);
-
-        // Word or List block
-        scaff_->builder_.SetInsertPoint(wordOrListBB);
-        Value *isEmpty = generateCallExtern(isDatumEmpty, PaAddr(wordorlist));
-        Value *isEmptyCond = scaff_->builder_.CreateICmpEQ(isEmpty, CoBool(false), DBG_NAME("isDatumEmptyCond"));
-        scaff_->builder_.CreateBr(endBB);
-
-        // Merge block
-        scaff_->builder_.SetInsertPoint(endBB);
-        PHINode *phi = scaff_->builder_.CreatePHI(wordOrListCond->getType(), 2, DBG_NAME("lastOfDatumResult"));
-        phi->addIncoming(isEmptyCond, wordOrListBB);
-        phi->addIncoming(wordOrListCond, startBB);
-        return phi;
-    };
-    return generateValidationDatum(parent, src, validator);
+    Q_ASSERT(thing1->getType()->isPointerTy());
+    Q_ASSERT(thing2->getType()->isPointerTy());
+    return generateCallExtern(cmpDatumToDatum, PaAddr(scaff_->evaluator_), PaAddr(thing1), PaAddr(thing2));
 }
 
-// TODO: This is a near duplicate of generateNotEmptyWordOrListFromDatum. Refactor.
-Value *Compiler::generateNotEmptyListFromDatum(ASTNode *parent, Value *src)
-{
-    auto validator = [this](Value *wordorlist) {
-        BasicBlock *startBB = scaff_->builder_.GetInsertBlock();
-
-        BasicBlock *listBB = scaff_->createBasicBlock(DBG_NAME("listBlock"));
-        BasicBlock *endBB = scaff_->createBasicBlock(DBG_NAME("endBlock"));
-
-        Value *wordOrListType = generateGetDatumIsa(wordorlist);
-        Value *maskCalc = scaff_->builder_.CreateAnd(wordOrListType, CoInt32(Datum::typeList), DBG_NAME("maskCalc"));
-        Value *wordOrListCond = scaff_->builder_.CreateICmpNE(maskCalc, CoInt32(0), DBG_NAME("listCond"));
-        scaff_->builder_.CreateCondBr(wordOrListCond, listBB, endBB);
-
-        // Word or List block
-        scaff_->builder_.SetInsertPoint(listBB);
-        Value *isEmpty = generateCallExtern(isDatumEmpty, PaAddr(wordorlist));
-        Value *isEmptyCond = scaff_->builder_.CreateICmpEQ(isEmpty, CoBool(false), DBG_NAME("isDatumEmptyCond"));
-        scaff_->builder_.CreateBr(endBB);
-
-        // Merge block
-        scaff_->builder_.SetInsertPoint(endBB);
-        PHINode *phi = scaff_->builder_.CreatePHI(wordOrListCond->getType(), 2, DBG_NAME("lastOfDatumResult"));
-        phi->addIncoming(isEmptyCond, listBB);
-        phi->addIncoming(wordOrListCond, startBB);
-        return phi;
-    };
-    return generateValidationDatum(parent, src, validator);
-}
 /***DOC EQUALP EQUAL?
 EQUALP thing1 thing2
 EQUAL? thing1 thing2
@@ -163,55 +117,12 @@ thing1 = thing2
 COD***/
 // CMD EQUALP 2 2 2 b
 // CMD EQUAL? 2 2 2 b
-Value *Compiler::genEqualp(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genEqualp(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnBool);
 
-    Value *thing1 = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
-    Value *thing2 = generateChild(node.astnodeValue(), 1, RequestReturnDatum);
-
-    Type *typeOfThing1 = thing1->getType();
-    Type *typeOfThing2 = thing2->getType();
-
-    // If one is bool and other is double, then they can't be equal.
-    if ((typeOfThing1->isIntegerTy(1) && typeOfThing2->isDoubleTy()) ||
-        (typeOfThing2->isIntegerTy(1) && typeOfThing1->isDoubleTy()))
-    {
-        return CoBool(false);
-    }
-
-    // Both double? Compare them
-    if (typeOfThing1->isDoubleTy() && typeOfThing2->isDoubleTy())
-    {
-        return scaff_->builder_.CreateFCmpUEQ(thing1, thing2, DBG_NAME("Fequalp"));
-    }
-
-    // Both bool? Compare them
-    if (typeOfThing1->isIntegerTy(1) && typeOfThing2->isIntegerTy(1))
-    {
-        return scaff_->builder_.CreateICmpEQ(thing1, thing2, DBG_NAME("Bequalp"));
-    }
-
-    // At this point we know at least one of the inputs is a Datum.
-    // For simplicity, make thing1 the Datum, and thing2 can be whatever the other type was.
-    if (!typeOfThing1->isPointerTy())
-    {
-        Value *t = thing1;
-        thing1 = thing2;
-        thing2 = t;
-        typeOfThing2 = thing2->getType();
-    }
-
-    if (typeOfThing2->isIntegerTy(1))
-    {
-        return generateCallExtern(cmpDatumToBool, PaAddr(scaff_->evaluator_), PaAddr(thing1), PaBool(thing2));
-    }
-    if (typeOfThing2->isDoubleTy())
-    {
-        return generateCallExtern(cmpDatumToDouble, PaAddr(scaff_->evaluator_), PaAddr(thing1), PaDouble(thing2));
-    }
-    Q_ASSERT(typeOfThing2->isPointerTy());
-    return generateCallExtern(cmpDatumToDatum, PaAddr(scaff_->evaluator_), PaAddr(thing1), PaAddr(thing2));
+    CallSite cs(this, node, TypeDatum, TypeDatum);
+    auto [thing1, thing2] = cs.children();
+    return cs.ret(generateEqualpCompare(thing1, thing2));
 }
 
 /***DOC NOTEQUALP NOTEQUAL?
@@ -225,10 +136,12 @@ thing1 <> thing2
 COD***/
 // CMD NOTEQUALP 2 2 2 b
 // CMD NOTEQUAL? 2 2 2 b
-Value *Compiler::genNotequalp(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genNotequalp(const DatumPtr &node, TypeMask expected)
 {
-    Value *eq = genEqualp(node, returnType);
-    return scaff_->builder_.CreateSub(CoBool(1), eq, "noteq");
+    CallSite cs(this, node, TypeDatum, TypeDatum);
+    auto [thing1, thing2] = cs.children();
+    Value *eq = generateEqualpCompare(thing1, thing2);
+    return cs.ret(scaff_->builder_.CreateNot(eq, DBG_NAME("noteq")));
 }
 
 // CONSTRUCTORS
@@ -241,11 +154,9 @@ WORD word1 word2
 
 COD***/
 // CMD WORD 0 2 -1 d
-Value *Compiler::genWord(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genWord(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    AllocaInst *ary = generateChildrenAlloca(node.astnodeValue(), RequestReturnDatum, DBG_NAME("wordAry"));
-    return generateCallExtern(concatWord, PaAddr(scaff_->evaluator_), PaAddr(ary), PaInt32(ary->getArraySize()));
+    return generateVariadicConstruct(node, concatWord, "concatWord", DBG_NAME("wordAry"), true);
 }
 
 /***DOC LIST
@@ -257,11 +168,9 @@ LIST thing1 thing2
 
 COD***/
 // CMD LIST 0 2 -1 d
-Value *Compiler::genList(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genList(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    AllocaInst *ary = generateChildrenAlloca(node.astnodeValue(), RequestReturnDatum, DBG_NAME("listAry"));
-    return generateCallExtern(createList, PaAddr(scaff_->evaluator_), PaAddr(ary), PaInt32(ary->getArraySize()));
+    return generateVariadicConstruct(node, createList, "createList", DBG_NAME("listAry"), false);
 }
 
 /***DOC SENTENCE SE
@@ -276,11 +185,9 @@ SE thing1 thing2
 COD***/
 // CMD SENTENCE 0 2 -1 d
 // CMD SE 0 2 -1 d
-Value *Compiler::genSentence(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genSentence(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    AllocaInst *ary = generateChildrenAlloca(node.astnodeValue(), RequestReturnDatum, DBG_NAME("sentenceAry"));
-    return generateCallExtern(createSentence, PaAddr(scaff_->evaluator_), PaAddr(ary), PaInt32(ary->getArraySize()));
+    return generateVariadicConstruct(node, createSentence, "createSentence", DBG_NAME("sentenceAry"), false);
 }
 /***DOC FPUT
 FPUT thing list
@@ -291,74 +198,47 @@ FPUT thing list
 
 COD***/
 // CMD FPUT 2 2 2 d
-Value *Compiler::genFput(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genFput(const DatumPtr &node, TypeMask expected)
 {
-    return generateFputlput(node, returnType, false);
+    return generateFputlput(node, expected, false);
 }
 
 /***DOC LPUT
 LPUT thing list
 
     outputs a list equal to its second input with one extra member,
-    the first input, at the end.  If the second input is a word,
-    then the first input must be a one-letter word, and LPUT is
-    equivalent to WORD with its inputs in the other order.
+    the first input, at the end. If the second input is a word,
+    then the first input must be a word, and LPUT is equivalent to
+    WORD with its inputs in the other order.
 
 COD***/
 // CMD LPUT 2 2 2 d
-Value *Compiler::genLput(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genLput(const DatumPtr &node, TypeMask expected)
 {
-    return generateFputlput(node, returnType, true);
+    return generateFputlput(node, expected, true);
 }
 
-Value *Compiler::generateFputlput(const DatumPtr &node, RequestReturnType returnType, bool isLput)
+Value *Compiler::generateFputlput(const DatumPtr &node, TypeMask expected, bool isLput)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *thing = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
-    Value *list = generateChild(node.astnodeValue(), 1, RequestReturnDatum);
-    Value *listWordTest = nullptr;
+    CallSite cs(this, node, TypeDatum, TypeDatum);
+    auto [thing, list] = cs.children();
+    ASTNode *parent = node.astnodeValue();
 
-    auto wordVector = isLput ? std::vector<Value *>{list, thing} : std::vector<Value *>{thing, list};
-
-    auto validator = [this, thing, &listWordTest](Value *list) {
-        BasicBlock *wordBB = scaff_->createBasicBlock(DBG_NAME("isWordBlock"));
-        BasicBlock *listBB = scaff_->createBasicBlock(DBG_NAME("isListBlock"));
-        BasicBlock *endBB = scaff_->createBasicBlock(DBG_NAME("endBlock"));
-
-        Value *listType = generateGetDatumIsa(list);
-        listWordTest = scaff_->builder_.CreateICmpEQ(listType, CoInt32(Datum::typeWord), DBG_NAME("listWordTest"));
-        scaff_->builder_.CreateCondBr(listWordTest, wordBB, listBB);
-
-        // Word block
-        scaff_->builder_.SetInsertPoint(wordBB);
-        Value *thingType = generateGetDatumIsa(thing);
-        Value *thingWordTest = scaff_->builder_.CreateICmpEQ(thingType, CoInt32(Datum::typeWord), DBG_NAME("thingWordTest"));
-        scaff_->builder_.CreateBr(endBB);
-
-        // List block
-        scaff_->builder_.SetInsertPoint(listBB);
-        Value *mask = scaff_->builder_.CreateAnd(listType, CoInt32(Datum::typeList), DBG_NAME("dataTypeMask"));
-        Value *listListTest = scaff_->builder_.CreateICmpNE(mask, CoInt32(0), DBG_NAME("dataTypeMaskTest"));
-        scaff_->builder_.CreateBr(endBB);
-
-        scaff_->builder_.SetInsertPoint(endBB);
-        PHINode *phi = scaff_->builder_.CreatePHI(listListTest->getType(), 2, DBG_NAME("putResult"));
-        phi->addIncoming(listListTest, listBB);
-        phi->addIncoming(thingWordTest, wordBB);
-        return phi;
-    };
-    list = generateValidationDatum(node.astnodeValue(), list, validator);
+    list = generateFromDatum(Datum::typeWordOrListMask, parent, list);
 
     BasicBlock *wordBB = scaff_->createBasicBlock(DBG_NAME("isWordBB"));
     BasicBlock *listBB = scaff_->createBasicBlock(DBG_NAME("isListBB"));
     BasicBlock *mergeBB = scaff_->createBasicBlock(DBG_NAME("mergeBB"));
 
-    scaff_->builder_.CreateCondBr(listWordTest, wordBB, listBB);
+    scaff_->builder_.CreateCondBr(generateIsWord(list), wordBB, listBB);
 
     scaff_->builder_.SetInsertPoint(wordBB);
+    Value *wordThing = generateWordFromDatum(parent, thing);
+    auto wordVector = isLput ? std::vector<Value *>{list, wordThing} : std::vector<Value *>{wordThing, list};
     AllocaInst *ary = generateAllocaAry(wordVector, DBG_NAME("wordAry"));
-    Value *wordRetval =
-        generateCallExtern(concatWord, PaAddr(scaff_->evaluator_), PaAddr(ary), PaInt32(ary->getArraySize()));
+    Value *wordRetval = generateCallExtern(concatWord, PaAddr(scaff_->evaluator_), PaAddr(ary), PaInt32(allocaN(ary)));
+    endAllocaLifetime(ary);
+    BasicBlock *wordDoneBB = scaff_->builder_.GetInsertBlock();
     scaff_->builder_.CreateBr(mergeBB);
 
     scaff_->builder_.SetInsertPoint(listBB);
@@ -369,14 +249,14 @@ Value *Compiler::generateFputlput(const DatumPtr &node, RequestReturnType return
     scaff_->builder_.SetInsertPoint(mergeBB);
     PHINode *phi = scaff_->builder_.CreatePHI(list->getType(), 2, DBG_NAME("putRetval"));
     phi->addIncoming(listRetval, listBB);
-    phi->addIncoming(wordRetval, wordBB);
-    return phi;
+    phi->addIncoming(wordRetval, wordDoneBB);
+    return cs.ret(phi);
 }
 /***DOC ARRAY
 ARRAY size
 (ARRAY size origin)
 
-    outputs an array of "size" members (must be a positive integer),
+    outputs an array of "size" members (must be a non-negative integer),
     each of which initially is an empty list.  Array members can be
     selected with ITEM and changed with SETITEM.  The first member of
     the array is member number 1 unless an "origin" input (must be an
@@ -387,25 +267,23 @@ ARRAY size
 
 COD***/
 // CMD ARRAY 1 1 2 d
-Value *Compiler::genArray(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genArray(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *size = generateChild(node.astnodeValue(), 0, RequestReturnReal);
+    CallSite cs(this, node, TypeReal);
+    Value *size = cs.child(0);
     Value *origin = nullptr;
-    if (node.astnodeValue()->countOfChildren() == 2)
+    if (cs.count() == 2)
     {
-        origin = generateChild(node.astnodeValue(), 1, RequestReturnReal);
-        origin = generateInt32FromDouble(node.astnodeValue(), origin, true);
+        origin = generateInt32FromDouble(node.astnodeValue(), cs.child(1), true);
     }
     else
     {
         origin = CoInt32(1);
     }
 
-    size = generateNotNegativeFromDouble(node.astnodeValue(), size);
-    size = generateInt32FromDouble(node.astnodeValue(), size, true);
+    size = generateNotNegativeInt32FromDouble(node.astnodeValue(), size);
 
-    return generateCallExtern(createArray, PaAddr(scaff_->evaluator_), PaInt32(size), PaInt32(origin));
+    return cs.ret(generateCallExtern(createArray, PaAddr(scaff_->evaluator_), PaInt32(size), PaInt32(origin)));
 }
 /***DOC LISTTOARRAY
 LISTTOARRAY list
@@ -416,23 +294,25 @@ LISTTOARRAY list
 
 COD***/
 // CMD LISTTOARRAY 1 1 2 d
-Value *Compiler::genListtoarray(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genListtoarray(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *list = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    std::vector<TypeMask> childTypes{TypeDatum};
+    if (node.astnodeValue()->countOfChildren() == 2)
+        childTypes.push_back(TypeReal);
+    CallSite cs(this, node, childTypes);
+    Value *list = cs.child(0);
     list = generateListFromDatum(node.astnodeValue(), list);
     Value *origin = nullptr;
-    if (node.astnodeValue()->countOfChildren() == 2)
+    if (cs.count() == 2)
     {
-        origin = generateChild(node.astnodeValue(), 1, RequestReturnReal);
-        origin = generateInt32FromDouble(node.astnodeValue(), origin, true);
+        origin = generateInt32FromDouble(node.astnodeValue(), cs.child(1), true);
     }
     else
     {
         origin = CoInt32(1);
     }
 
-    return generateCallExtern(listToArray, PaAddr(scaff_->evaluator_), PaAddr(list), PaInt32(origin));
+    return cs.ret(generateCallExtern(listToArray, PaAddr(scaff_->evaluator_), PaAddr(list), PaInt32(origin)));
 }
 /***DOC ARRAYTOLIST
 ARRAYTOLIST array
@@ -443,12 +323,12 @@ ARRAYTOLIST array
 
 COD***/
 // CMD ARRAYTOLIST 1 1 1 d
-Value *Compiler::genArraytolist(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genArraytolist(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *array = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum);
+    Value *array = cs.child(0);
     array = generateArrayFromDatum(node.astnodeValue(), array);
-    return generateCallExtern(arrayToList, PaAddr(scaff_->evaluator_), PaAddr(array));
+    return cs.ret(generateCallExtern(arrayToList, PaAddr(scaff_->evaluator_), PaAddr(array)));
 }
 /***DOC FIRST
 FIRST thing
@@ -460,18 +340,18 @@ FIRST thing
 
 COD***/
 // CMD FIRST 1 1 1 d
-Value *Compiler::genFirst(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genFirst(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *thing = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum);
+    Value *thing = cs.child(0);
 
     auto validator = [this](Value *thing) {
-        Value *isEmpty = generateCallExtern(isDatumEmpty, PaAddr(thing));
-        return scaff_->builder_.CreateICmpEQ(isEmpty, CoBool(false), DBG_NAME("isDatumEmptyCond"));
+        Value *isEmptyVal = generateCallExtern(isEmpty, PaAddr(thing));
+        return scaff_->builder_.CreateICmpEQ(isEmptyVal, CoBool(false), DBG_NAME("isEmptyCond"));
     };
     thing = generateValidationDatum(node.astnodeValue(), thing, validator);
 
-    return generateCallExtern(firstOfDatum, PaAddr(scaff_->evaluator_), PaAddr(thing));
+    return cs.ret(generateCallExtern(firstOfDatum, PaAddr(scaff_->evaluator_), PaAddr(thing)));
 }
 /***DOC LAST
 LAST wordorlist
@@ -481,14 +361,14 @@ LAST wordorlist
 
 COD***/
 // CMD LAST 1 1 1 d
-Value *Compiler::genLast(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genLast(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *wordorlist = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum);
+    Value *wordorlist = cs.child(0);
 
-    wordorlist = generateNotEmptyWordOrListFromDatum(node.astnodeValue(), wordorlist);
+    wordorlist = generateNotEmptyFromDatum(node.astnodeValue(), wordorlist, Datum::typeWordOrListMask);
 
-    return generateCallExtern(lastOfDatum, PaAddr(scaff_->evaluator_), PaAddr(wordorlist));
+    return cs.ret(generateCallExtern(lastOfDatum, PaAddr(scaff_->evaluator_), PaAddr(wordorlist)));
 }
 /***DOC BUTFIRST BF
 BUTFIRST wordorlist
@@ -501,14 +381,61 @@ BF wordorlist
 COD***/
 // CMD BUTFIRST 1 1 1 d
 // CMD BF 1 1 1 d
-Value *Compiler::genButfirst(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genButfirst(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *wordorlist = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum);
+    Value *wordorlist = cs.child(0);
 
-    wordorlist = generateNotEmptyWordOrListFromDatum(node.astnodeValue(), wordorlist);
+    wordorlist = generateNotEmptyFromDatum(node.astnodeValue(), wordorlist, Datum::typeWordOrListMask);
 
-    return generateCallExtern(butFirstOfDatum, PaAddr(scaff_->evaluator_), PaAddr(wordorlist));
+    return cs.ret(generateCallExtern(butFirstOfDatum, PaAddr(scaff_->evaluator_), PaAddr(wordorlist)));
+}
+/***DOC FIRSTS
+FIRSTS list
+
+        outputs a list containing the FIRST of each member of the input
+        list.  It is an error if any member of the input list is empty.
+        (The input itself may be empty, in which case the output is also
+        empty.)  This could be written as
+
+                to firsts :list
+                output map "first :list
+                end
+
+        but is provided as a primitive in order to speed up the iteration
+        tools MAP, MAP.SE, and FOREACH.
+
+COD***/
+// CMD FIRSTS 1 1 1 d
+Value *Compiler::genFirsts(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeDatum);
+    Value *list = cs.child(0);
+    list = generateListFromDatum(node.astnodeValue(), list);
+    return cs.ret(generateCallExtern(firstsOfList,
+                                     PaAddr(scaff_->evaluator_),
+                                     PaAddr(CoAddr(node.astnodeValue()->nodeName_.datumValue())),
+                                     PaAddr(list)));
+}
+/***DOC BUTFIRSTS BFS
+BUTFIRSTS list
+BFS list
+
+    outputs a list of the butfirsts of the members of its input, which
+    must be a list of lists or a list of words.
+
+COD***/
+// CMD BUTFIRSTS 1 1 1 d
+// CMD BFS 1 1 1 d
+Value *Compiler::genButfirsts(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeDatum);
+    Value *list = cs.child(0);
+    list = generateListFromDatum(node.astnodeValue(), list);
+    return cs.ret(generateCallExtern(butfirstsOfList,
+                                     PaAddr(scaff_->evaluator_),
+                                     PaAddr(CoAddr(node.astnodeValue()->nodeName_.datumValue())),
+                                     PaAddr(list)));
 }
 /***DOC BUTLAST BL
 BUTLAST wordorlist
@@ -521,14 +448,14 @@ BL wordorlist
 COD***/
 // CMD BUTLAST 1 1 1 d
 // CMD BL 1 1 1 d
-Value *Compiler::genButlast(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genButlast(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *wordorlist = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum);
+    Value *wordorlist = cs.child(0);
 
-    wordorlist = generateNotEmptyWordOrListFromDatum(node.astnodeValue(), wordorlist);
+    wordorlist = generateNotEmptyFromDatum(node.astnodeValue(), wordorlist, Datum::typeWordOrListMask);
 
-    return generateCallExtern(butLastOfDatum, PaAddr(scaff_->evaluator_), PaAddr(wordorlist));
+    return cs.ret(generateCallExtern(butLastOfDatum, PaAddr(scaff_->evaluator_), PaAddr(wordorlist)));
 }
 /***DOC ITEM
 ITEM index thing
@@ -542,25 +469,27 @@ ITEM index thing
 
 COD***/
 // CMD ITEM 2 2 2 d
-Value *Compiler::genItem(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genItem(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *index = generateChild(node.astnodeValue(), 0, RequestReturnReal);
-    Value *thing = generateChild(node.astnodeValue(), 1, RequestReturnDatum);
+    CallSite cs(this, node, TypeReal, TypeDatum);
+    auto [index, thing] = cs.children();
 
-    // Instead of iterating a list twice, we'll save the list item if we find it when counting.
-    Datum *listItem = nullptr;
-    Datum **listItemPtr = &listItem;
+    // Instead of iterating a list twice, save the member when counting.
+    // The slot lives in the compiled frame (not a genItem C++ local).
+    AllocaInst *listItemSlot = scaff_->createEntryBlockAlloca(TyAddr, DBG_NAME("listItem"));
+    beginAllocaLifetime(listItemSlot);
+    scaff_->builder_.CreateStore(CoAddr(0), listItemSlot);
 
-    auto validator = [this, listItemPtr, thing](Value *index) {
-        Value *isValid =
-            generateCallExtern(isDatumIndexValid, PaAddr(thing), PaDouble(index), PaAddr(CoAddr(listItemPtr)));
+    auto validator = [this, listItemSlot, thing](Value *index) {
+        Value *isValid = generateCallExtern(isDatumIndexValid, PaAddr(thing), PaDouble(index), PaAddr(listItemSlot));
         return scaff_->builder_.CreateICmpEQ(isValid, CoBool(true), DBG_NAME("isDatumIndexValidCond"));
     };
     index = generateValidationDouble(node.astnodeValue(), index, validator);
 
-    return generateCallExtern(
-        itemOfDatum, PaAddr(scaff_->evaluator_), PaAddr(thing), PaDouble(index), PaAddr(CoAddr(listItemPtr)));
+    Value *item = generateCallExtern(
+        itemOfDatum, PaAddr(scaff_->evaluator_), PaAddr(thing), PaDouble(index), PaAddr(listItemSlot));
+    endAllocaLifetime(listItemSlot);
+    return cs.ret(item);
 }
 /***DOC SETITEM
 SETITEM index array value
@@ -571,9 +500,9 @@ SETITEM index array value
 
 COD***/
 // CMD SETITEM 3 3 3 n
-Value *Compiler::genSetitem(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genSetitem(const DatumPtr &node, TypeMask expected)
 {
-    return generateSetitem(node, returnType, false);
+    return generateSetitem(node, expected, false);
 }
 
 /***DOC .SETITEM
@@ -589,26 +518,22 @@ Value *Compiler::genSetitem(const DatumPtr &node, RequestReturnType returnType)
 
 COD***/
 // CMD .SETITEM 3 3 3 n
-Value *Compiler::genDotSetitem(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genDotSetitem(const DatumPtr &node, TypeMask expected)
 {
-    return generateSetitem(node, returnType, true);
+    return generateSetitem(node, expected, true);
 }
 
-Value *Compiler::generateSetitem(const DatumPtr &node, RequestReturnType returnType, bool isDangerous)
+Value *Compiler::generateSetitem(const DatumPtr &node, TypeMask expected, bool isDangerous)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *index = generateChild(node.astnodeValue(), 0, RequestReturnReal);
-    Value *array = generateChild(node.astnodeValue(), 1, RequestReturnDatum);
+    CallSite cs(this, node, TypeReal, TypeDatum, TypeDatum);
+    auto [index, array, value] = cs.children();
     array = generateArrayFromDatum(node.astnodeValue(), array);
 
     auto indexValidator = [this, array](Value *index) {
-        Value *isValid =
-            generateCallExtern(isDatumIndexValid, PaAddr(array), PaDouble(index), PaAddr(CoAddr(0)));
+        Value *isValid = generateCallExtern(isDatumIndexValid, PaAddr(array), PaDouble(index), PaAddr(CoAddr(0)));
         return scaff_->builder_.CreateICmpEQ(isValid, CoBool(true), DBG_NAME("isDatumIndexValidCond"));
     };
     index = generateValidationDouble(node.astnodeValue(), index, indexValidator);
-
-    Value *value = generateChild(node.astnodeValue(), 2, RequestReturnDatum);
 
     if (!isDangerous)
     {
@@ -621,7 +546,7 @@ Value *Compiler::generateSetitem(const DatumPtr &node, RequestReturnType returnT
     }
 
     generateCallExtern(setDatumAtIndexOfContainer, PaAddr(value), PaDouble(index), PaAddr(array));
-    return generateVoidRetval(node.astnodeValue());
+    return cs.ret(generateVoidRetval(node));
 }
 
 /***DOC .SETFIRST
@@ -637,14 +562,13 @@ Value *Compiler::generateSetitem(const DatumPtr &node, RequestReturnType returnT
 
 COD***/
 // CMD .SETFIRST 2 2 2 n
-Value *Compiler::genDotSetfirst(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genDotSetfirst(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *list = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
-    Value *value = generateChild(node.astnodeValue(), 1, RequestReturnDatum);
-    list = generateNotEmptyListFromDatum(node.astnodeValue(), list);
+    CallSite cs(this, node, TypeDatum, TypeDatum);
+    auto [list, value] = cs.children();
+    list = generateNotEmptyFromDatum(node.astnodeValue(), list, Datum::typeList);
     generateCallExtern(setFirstOfList, PaAddr(list), PaAddr(value));
-    return generateVoidRetval(node.astnodeValue());
+    return cs.ret(generateVoidRetval(node));
 }
 /***DOC .SETBF
 .SETBF list value
@@ -660,15 +584,14 @@ Value *Compiler::genDotSetfirst(const DatumPtr &node, RequestReturnType returnTy
 
 COD***/
 // CMD .SETBF 2 2 2 n
-Value *Compiler::genDotSetbf(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genDotSetbf(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *list = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
-    Value *value = generateChild(node.astnodeValue(), 1, RequestReturnDatum);
-    list = generateNotEmptyListFromDatum(node.astnodeValue(), list);
+    CallSite cs(this, node, TypeDatum, TypeDatum);
+    auto [list, value] = cs.children();
+    list = generateNotEmptyFromDatum(node.astnodeValue(), list, Datum::typeList);
     value = generateListFromDatum(node.astnodeValue(), value);
     generateCallExtern(setButfirstOfList, PaAddr(list), PaAddr(value));
-    return generateVoidRetval(node.astnodeValue());
+    return cs.ret(generateVoidRetval(node));
 }
 /***DOC WORDP WORD?
 WORDP thing
@@ -679,13 +602,11 @@ WORD? thing
 COD***/
 // CMD WORDP 1 1 1 b
 // CMD WORD? 1 1 1 b
-Value *Compiler::genWordp(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genWordp(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *thing = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
-    Value *thingType = generateGetDatumIsa(thing);
-    Value *isType = scaff_->builder_.CreateICmpEQ(thingType, CoInt32(Datum::typeWord), DBG_NAME("isDatumTypeCond"));
-    return scaff_->builder_.CreateSelect(isType, CoBool(true), CoBool(false), DBG_NAME("isDatumTypeResult"));
+    CallSite cs(this, node, TypeDatum);
+    Value *thing = cs.child(0);
+    return cs.ret(generateIsWord(thing));
 }
 
 /***DOC ARRAYP ARRAY?
@@ -697,13 +618,13 @@ ARRAY? thing
 COD***/
 // CMD ARRAYP 1 1 1 b
 // CMD ARRAY? 1 1 1 b
-Value *Compiler::genArrayp(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genArrayp(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *thing = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum);
+    Value *thing = cs.child(0);
     Value *thingType = generateGetDatumIsa(thing);
     Value *isType = scaff_->builder_.CreateICmpEQ(thingType, CoInt32(Datum::typeArray), DBG_NAME("isDatumTypeCond"));
-    return scaff_->builder_.CreateSelect(isType, CoBool(true), CoBool(false), DBG_NAME("isDatumTypeResult"));
+    return cs.ret(isType);
 }
 
 /***DOC LISTP LIST?
@@ -715,14 +636,14 @@ LIST? thing
 COD***/
 // CMD LISTP 1 1 1 b
 // CMD LIST? 1 1 1 b
-Value *Compiler::genListp(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genListp(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *thing = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum);
+    Value *thing = cs.child(0);
     Value *thingType = generateGetDatumIsa(thing);
     Value *mask = scaff_->builder_.CreateAnd(thingType, CoInt32(Datum::typeList), DBG_NAME("dataTypeMask"));
     Value *cond = scaff_->builder_.CreateICmpNE(mask, CoInt32(0), DBG_NAME("typeTest"));
-    return scaff_->builder_.CreateSelect(cond, CoBool(true), CoBool(false), DBG_NAME("isDatumTypeResult"));
+    return cs.ret(cond);
 }
 
 /***DOC EMPTYP EMPTY?
@@ -735,11 +656,11 @@ EMPTY? thing
 COD***/
 // CMD EMPTYP 1 1 1 b
 // CMD EMPTY? 1 1 1 b
-Value *Compiler::genEmptyp(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genEmptyp(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *thing = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
-    return generateCallExtern(isEmpty, PaAddr(thing));
+    CallSite cs(this, node, TypeDatum);
+    Value *thing = cs.child(0);
+    return cs.ret(generateCallExtern(isEmpty, PaAddr(thing)));
 }
 /***DOC BEFOREP BEFORE?
 BEFOREP word1 word2
@@ -754,14 +675,13 @@ BEFORE? word1 word2
 COD***/
 // CMD BEFOREP 2 2 2 b
 // CMD BEFORE? 2 2 2 b
-Value *Compiler::genBeforep(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genBeforep(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *word1 = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
-    Value *word2 = generateChild(node.astnodeValue(), 1, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum, TypeDatum);
+    auto [word1, word2] = cs.children();
     word1 = generateWordFromDatum(node.astnodeValue(), word1);
     word2 = generateWordFromDatum(node.astnodeValue(), word2);
-    return generateCallExtern(isBefore, PaAddr(scaff_->evaluator_), PaAddr(word1), PaAddr(word2));
+    return cs.ret(generateCallExtern(isBefore, PaAddr(scaff_->evaluator_), PaAddr(word1), PaAddr(word2)));
 }
 /***DOC .EQ
 .EQ thing1 thing2
@@ -775,13 +695,12 @@ Value *Compiler::genBeforep(const DatumPtr &node, RequestReturnType returnType)
 
 COD***/
 // CMD .EQ 2 2 2 b
-Value *Compiler::genDotEq(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genDotEq(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *thing1 = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
-    Value *thing2 = generateChild(node.astnodeValue(), 1, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum, TypeDatum);
+    auto [thing1, thing2] = cs.children();
     Value *isEqualCond = scaff_->builder_.CreateICmpEQ(thing1, thing2, DBG_NAME("isEqualCond"));
-    return scaff_->builder_.CreateSelect(isEqualCond, CoBool(true), CoBool(false), DBG_NAME("isEqualResult"));
+    return cs.ret(isEqualCond);
 }
 
 /***DOC MEMBERP MEMBER?
@@ -796,12 +715,11 @@ MEMBER? thing1 thing2
 COD***/
 // CMD MEMBERP 2 2 2 b
 // CMD MEMBER? 2 2 2 b
-Value *Compiler::genMemberp(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genMemberp(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *thing1 = generateChild(node.astnodeValue(), 0, RequestReturnDatum); // thing
-    Value *thing2 = generateChild(node.astnodeValue(), 1, RequestReturnDatum); // container
-    return generateCallExtern(isMember, PaAddr(scaff_->evaluator_), PaAddr(thing1), PaAddr(thing2));
+    CallSite cs(this, node, TypeDatum, TypeDatum);
+    auto [thing1, thing2] = cs.children(); // thing, container
+    return cs.ret(generateCallExtern(isMember, PaAddr(scaff_->evaluator_), PaAddr(thing1), PaAddr(thing2)));
 }
 /***DOC SUBSTRINGP SUBSTRING?
 SUBSTRINGP thing1 thing2
@@ -814,12 +732,11 @@ SUBSTRING? thing1 thing2
 COD***/
 // CMD SUBSTRINGP 2 2 2 b
 // CMD SUBSTRING? 2 2 2 b
-Value *Compiler::genSubstringp(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genSubstringp(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *thing1 = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
-    Value *thing2 = generateChild(node.astnodeValue(), 1, RequestReturnDatum);
-    return generateCallExtern(isSubstring, PaAddr(thing1), PaAddr(thing2));
+    CallSite cs(this, node, TypeDatum, TypeDatum);
+    auto [thing1, thing2] = cs.children();
+    return cs.ret(generateCallExtern(isSubstring, PaAddr(scaff_->evaluator_), PaAddr(thing1), PaAddr(thing2)));
 }
 /***DOC NUMBERP NUMBER?
 NUMBERP thing
@@ -830,11 +747,11 @@ NUMBER? thing
 COD***/
 // CMD NUMBERP 1 1 1 b
 // CMD NUMBER? 1 1 1 b
-Value *Compiler::genNumberp(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genNumberp(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *thing = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
-    return generateCallExtern(isNumber, PaAddr(thing));
+    CallSite cs(this, node, TypeDatum);
+    Value *thing = cs.child(0);
+    return cs.ret(generateCallExtern(isNumber, PaAddr(thing)));
 }
 /***DOC VBARREDP VBARRED? BACKSLASHEDP BACKSLASHED?
 VBARREDP char
@@ -856,18 +773,13 @@ BACKSLASHED? char                               (library procedure)
 COD***/
 // CMD VBARREDP 1 1 1 b
 // CMD VBARRED? 1 1 1 b
-Value *Compiler::genVbarredp(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genVbarredp(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *c = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum);
+    Value *c = cs.child(0);
+    c = generateSingleCharWordFromDatum(node.astnodeValue(), c);
 
-    auto validator = [this](Value *candidate) {
-        Value *isGoodChar = generateCallExtern(isSingleCharWord, PaAddr(candidate));
-        return scaff_->builder_.CreateICmpEQ(isGoodChar, CoBool(true), DBG_NAME("isGoodCond"));
-    };
-    c = generateValidationDatum(node.astnodeValue(), c, validator);
-
-    return generateCallExtern(isVbarred, PaAddr(c));
+    return cs.ret(generateCallExtern(isVbarred, PaAddr(c)));
 }
 /***DOC COUNT
 COUNT thing
@@ -879,11 +791,11 @@ COUNT thing
 
 COD***/
 // CMD COUNT 1 1 1 n
-Value *Compiler::genCount(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genCount(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *thing = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
-    return generateCallExtern(datumCount, PaAddr(thing));
+    CallSite cs(this, node, TypeDatum);
+    Value *thing = cs.child(0);
+    return cs.ret(generateCallExtern(datumCount, PaAddr(thing)));
 }
 /***DOC ASCII
 ASCII char
@@ -900,18 +812,13 @@ ASCII char
 
 COD***/
 // CMD ASCII 1 1 1 n
-Value *Compiler::genAscii(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genAscii(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *c = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum);
+    Value *c = cs.child(0);
+    c = generateSingleCharWordFromDatum(node.astnodeValue(), c);
 
-    auto validator = [this](Value *candidate) {
-        Value *isGoodChar = generateCallExtern(isSingleCharWord, PaAddr(candidate));
-        return scaff_->builder_.CreateICmpEQ(isGoodChar, CoBool(true), DBG_NAME("isGoodCond"));
-    };
-    c = generateValidationDatum(node.astnodeValue(), c, validator);
-
-    return generateCallExtern(ascii, PaAddr(c));
+    return cs.ret(generateCallExtern(ascii, PaAddr(c)));
 }
 /***DOC RAWASCII
 RAWASCII char
@@ -925,18 +832,13 @@ RAWASCII char
 
 COD***/
 // CMD RAWASCII 1 1 1 n
-Value *Compiler::genRawascii(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genRawascii(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *c = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum);
+    Value *c = cs.child(0);
+    c = generateSingleCharWordFromDatum(node.astnodeValue(), c);
 
-    auto validator = [this](Value *candidate) {
-        Value *isGoodChar = generateCallExtern(isSingleCharWord, PaAddr(candidate));
-        return scaff_->builder_.CreateICmpEQ(isGoodChar, CoBool(true), DBG_NAME("isGoodCond"));
-    };
-    c = generateValidationDatum(node.astnodeValue(), c, validator);
-
-    return generateCallExtern(rawascii, PaAddr(c));
+    return cs.ret(generateCallExtern(rawascii, PaAddr(c)));
 }
 /***DOC CHAR
 CHAR int
@@ -948,20 +850,16 @@ CHAR int
 
 COD***/
 // CMD CHAR 1 1 1 d
-Value *Compiler::genChar(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genChar(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *c = generateChild(node.astnodeValue(), 0, RequestReturnReal);
+    CallSite cs(this, node, TypeReal);
+    Value *c = cs.child(0);
 
-    Value *retval = nullptr;
-    auto validator = [this, &retval](Value *candidate) {
-        retval = scaff_->builder_.CreateFPToUI(candidate, TyInt32, DBG_NAME("FpToInt"));
-        retval = scaff_->builder_.CreateAnd(retval, CoInt32(65535), DBG_NAME("intMask"));
-        Value *retvalCheck = scaff_->builder_.CreateUIToFP(retval, TyDouble, DBG_NAME("FpToIntCheck"));
-        return scaff_->builder_.CreateFCmpOEQ(candidate, retvalCheck, DBG_NAME("isValidTest"));
-    };
-    generateValidationDouble(node.astnodeValue(), c, validator);
-    return generateCallExtern(chr, PaAddr(scaff_->evaluator_), PaInt32(retval));
+    Value *accepted = generateValidationDouble(node.astnodeValue(), c, [this](Value *candidate) {
+        return generateIsExactIntegerInRange(candidate, 0.0, 65535.0);
+    });
+    Value *asInt = scaff_->builder_.CreateFPToUI(accepted, TyInt32, DBG_NAME("FpToInt"));
+    return cs.ret(generateCallExtern(chr, PaAddr(scaff_->evaluator_), PaInt32(asInt)));
 }
 /***DOC MEMBER
 MEMBER thing1 thing2
@@ -974,14 +872,13 @@ MEMBER thing1 thing2
 
 COD***/
 // CMD MEMBER 2 2 2 d
-Value *Compiler::genMember(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genMember(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *thing1 = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
-    Value *thing2 = generateChild(node.astnodeValue(), 1, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum, TypeDatum);
+    auto [thing1, thing2] = cs.children();
 
     thing2 = generateFromDatum(Datum::typeWordOrListMask, node.astnodeValue(), thing2);
-    return generateCallExtern(member, PaAddr(scaff_->evaluator_), PaAddr(thing1), PaAddr(thing2));
+    return cs.ret(generateCallExtern(member, PaAddr(scaff_->evaluator_), PaAddr(thing1), PaAddr(thing2)));
 }
 /***DOC LOWERCASE
 LOWERCASE word
@@ -991,12 +888,12 @@ LOWERCASE word
 
 COD***/
 // CMD LOWERCASE 1 1 1 d
-Value *Compiler::genLowercase(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genLowercase(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *word = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum);
+    Value *word = cs.child(0);
     word = generateFromDatum(Datum::typeWord, node.astnodeValue(), word);
-    return generateCallExtern(lowercase, PaAddr(scaff_->evaluator_), PaAddr(word));
+    return cs.ret(generateCallExtern(lowercase, PaAddr(scaff_->evaluator_), PaAddr(word)));
 }
 /***DOC UPPERCASE
 UPPERCASE word
@@ -1006,12 +903,12 @@ UPPERCASE word
 
 COD***/
 // CMD UPPERCASE 1 1 1 d
-Value *Compiler::genUppercase(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genUppercase(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *word = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum);
+    Value *word = cs.child(0);
     word = generateFromDatum(Datum::typeWord, node.astnodeValue(), word);
-    return generateCallExtern(uppercase, PaAddr(scaff_->evaluator_), PaAddr(word));
+    return cs.ret(generateCallExtern(uppercase, PaAddr(scaff_->evaluator_), PaAddr(word)));
 }
 /***DOC STANDOUT
 STANDOUT thing
@@ -1025,11 +922,11 @@ STANDOUT thing
 
 COD***/
 // CMD STANDOUT 1 1 1 d
-Value *Compiler::genStandout(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genStandout(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *thing = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
-    return generateCallExtern(standout, PaAddr(scaff_->evaluator_), PaAddr(thing));
+    CallSite cs(this, node, TypeDatum);
+    Value *thing = cs.child(0);
+    return cs.ret(generateCallExtern(standout, PaAddr(scaff_->evaluator_), PaAddr(thing)));
 }
 /***DOC PARSE
 PARSE word
@@ -1040,12 +937,12 @@ PARSE word
 
 COD***/
 // CMD PARSE 1 1 1 d
-Value *Compiler::genParse(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genParse(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *word = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum);
+    Value *word = cs.child(0);
     word = generateFromDatum(Datum::typeWord, node.astnodeValue(), word);
-    return generateCallExtern(parse, PaAddr(scaff_->evaluator_), PaAddr(word));
+    return cs.ret(generateCallExtern(parse, PaAddr(scaff_->evaluator_), PaAddr(word)));
 }
 /***DOC RUNPARSE
 RUNPARSE wordorlist
@@ -1058,10 +955,337 @@ RUNPARSE wordorlist
 
 COD***/
 // CMD RUNPARSE 1 1 1 d
-Value *Compiler::genRunparse(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genRunparse(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnDatum);
-    Value *wordorlist = generateChild(node.astnodeValue(), 0, RequestReturnDatum);
+    CallSite cs(this, node, TypeDatum);
+    Value *wordorlist = cs.child(0);
     wordorlist = generateFromDatum(Datum::typeWordOrListMask, node.astnodeValue(), wordorlist);
-    return generateCallExtern(runparseDatum, PaAddr(scaff_->evaluator_), PaAddr(wordorlist));
+    return cs.ret(generateCallExtern(runparseDatum, PaAddr(scaff_->evaluator_), PaAddr(wordorlist)));
 }
+
+/***DOC MDARRAY
+MDARRAY sizelist					(library procedure)
+(MDARRAY sizelist origin)
+
+    outputs a multi-dimensional array.  The first input must be a list
+    of one or more positive integers.  The second input, if present,
+    must be a single integer that applies to every dimension of the array.
+    Ex: (MDARRAY [3 5] 0) outputs a two-dimensional array whose members
+    range from [0 0] to [2 4].
+
+COD***/
+
+/***LIB MDARRAY
+;;; -*- logo -*-
+
+to mdarray :sizes [:origin 1]
+local "array
+make "array (array first :sizes :origin)
+if not emptyp bf :sizes ~
+   [for [i :origin [:origin + (first :sizes) - 1]] ~
+        [setitem :i :array (mdarray bf :sizes :origin)]]
+output :array
+end
+
+bury "mdarray
+
+BIL***/
+
+/***DOC COMBINE
+COMBINE thing1 thing2					(library procedure)
+
+    if thing2 is a word, outputs WORD thing1 thing2.  If thing2 is a list,
+    outputs FPUT thing1 thing2.
+
+COD***/
+
+/***LIB COMBINE
+;;; -*- logo -*-
+
+to combine :this :those
+if wordp :those [output word :this :those]
+output fput :this :those
+end
+
+bury "combine
+
+BIL***/
+
+/***DOC REVERSE
+REVERSE list						(library procedure)
+
+    outputs a list whose members are the members of the input list, in
+    reverse order.
+
+COD***/
+
+/***LIB REVERSE
+;;; -*- logo -*-
+
+to reverse :in [:out ifelse listp :in [[]] ["]]
+if emptyp :in [output :out]
+output (reverse bf :in combine first :in :out)
+end
+
+bury "reverse
+
+BIL***/
+
+/***DOC GENSYM
+GENSYM							(library procedure)
+
+    outputs a unique word each time it's invoked.  The words are of the
+    form G1, G2, etc.
+
+
+COD***/
+
+/***LIB GENSYM
+;;; -*- logo -*-
+
+to gensym
+if not namep "gensym.number [make "gensym.number 0]
+make "gensym.number :gensym.number + 1
+output word "g :gensym.number
+end
+
+bury [[gensym] [gensym.number]]
+
+BIL***/
+
+/***DOC MDITEM
+MDITEM indexlist array					(library procedure)
+
+    outputs the member of the multidimensional "array" selected by
+    the list of numbers "indexlist".
+
+COD***/
+
+/***LIB MDITEM
+;;; -*- logo -*-
+
+to mditem :index :array
+if emptyp :index [op :array]
+op mditem bf :index item first :index :array
+end
+
+bury "mditem
+
+BIL***/
+
+/***DOC PICK
+PICK list						(library procedure)
+
+    outputs a randomly chosen member of the input list.
+
+COD***/
+
+/***LIB PICK
+;;; -*- logo -*-
+
+to pick :list
+output item (1+random count :list) :list
+end
+
+bury "pick
+
+BIL***/
+
+/***DOC REMOVE
+REMOVE thing list					(library procedure)
+
+    outputs a copy of "list" with every member equal to "thing" removed.
+
+COD***/
+
+/***LIB REMOVE
+;;; -*- logo -*-
+
+to remove :thing :list
+output filter [not equalp ? :thing] :list
+end
+
+bury "remove
+
+BIL***/
+
+/***DOC REMDUP
+REMDUP list						(library procedure)
+
+    outputs a copy of "list" with duplicate members removed.  If two or
+    more members of the input are equal, the rightmost of those members
+    is the one that remains in the output.
+
+COD***/
+
+/***LIB REMDUP
+;;; -*- logo -*-
+
+to remdup :list
+output filter [not memberp ? ?rest] :list
+end
+
+bury "remdup
+
+BIL***/
+
+/***DOC QUOTED
+QUOTED thing						(library procedure)
+
+    outputs its input, if a list; outputs its input with a quotation
+    mark prepended, if a word.
+
+
+COD***/
+
+/***LIB QUOTED
+;;; -*- logo -*-
+
+to quoted :stuff
+if wordp :stuff [op word "" :stuff]
+op :stuff
+end
+
+bury "quoted
+
+BIL***/
+
+/***DOC MDSETITEM
+MDSETITEM indexlist array value				(library procedure)
+
+    command.  Replaces the member of "array" chosen by "indexlist"
+    with the new "value".
+
+COD***/
+
+/***LIB MDSETITEM
+;;; -*- logo -*-
+
+to mdsetitem :index :array :val
+setitem last :index (mditem bl :index :array) :val
+end
+
+bury "mdsetitem
+
+BIL***/
+
+/***DOC PUSH
+PUSH stackname thing					(library procedure)
+
+    command.  Adds the "thing" to the stack that is the value of the
+    variable whose name is "stackname".  This variable must have a list
+    as its value; the initial value should be the empty list.  New
+    members are added at the front of the list.
+
+COD***/
+
+/***LIB PUSH
+;;; -*- logo -*-
+
+to push :the.stack.name :the.item.value
+make :the.stack.name fput :the.item.value thing :the.stack.name
+end
+
+bury "push
+
+BIL***/
+
+/***DOC POP
+POP stackname						(library procedure)
+
+    outputs the most recently PUSHed member of the stack that is the
+    value of the variable whose name is "stackname" and removes that
+    member from the stack.
+
+COD***/
+
+/***LIB POP
+;;; -*- logo -*-
+
+to pop :the.stack.name
+local "result
+make "result first thing :the.stack.name
+make :the.stack.name butfirst thing :the.stack.name
+output :result
+end
+
+bury "pop
+
+BIL***/
+
+/***DOC QUEUE
+QUEUE queuename thing					(library procedure)
+
+    command.  Adds the "thing" to the queue that is the value of the
+    variable whose name is "queuename".  This variable must have a list
+    as its value; the initial value should be the empty list.  New
+    members are added at the back of the list.
+
+COD***/
+
+/***LIB QUEUE
+;;; -*- logo -*-
+
+to queue :the.queue.name :the.item.value
+make :the.queue.name lput :the.item.value thing :the.queue.name
+end
+
+bury "queue
+
+BIL***/
+
+/***DOC DEQUEUE
+DEQUEUE queuename					(library procedure)
+
+    outputs the least recently QUEUEd member of the queue that is the
+    value of the variable whose name is "queuename" and removes that
+    member from the queue.
+
+COD***/
+
+/***LIB DEQUEUE
+;;; -*- logo -*-
+
+to dequeue :the.queue.name
+local "result
+make "result first thing :the.queue.name
+make :the.queue.name butfirst thing :the.queue.name
+output :result
+end
+
+bury "dequeue
+
+BIL***/
+
+/***LIB BACKSLASHEDP
+;;; -*- logo -*-
+
+to backslashedp :char
+op vbarredp :char
+end
+
+bury "backslashedp
+
+BIL***/
+
+/***LIB BACKSLASHED?
+;;; -*- logo -*-
+
+to backslashed? :char
+op vbarredp :char
+end
+
+bury "backslashed?
+
+BIL***/
+
+/***LIB ?REST
+;;; -*- logo -*-
+
+to ?rest [:which 1]
+output bf item :which :template.lists
+end
+
+bury "?rest
+
+BIL***/

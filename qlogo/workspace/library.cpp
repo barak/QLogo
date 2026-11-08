@@ -27,25 +27,25 @@
 #include <QSqlQuery>
 #include <QStringList>
 
-/// @brief Find the path to the database file.
-/// @param defaultDBName The default name of the database file.
-/// @returns The path to the database file, or an empty string if the file is not found.
-/// @note this functions checks for the database file in the following locations:
-/// - The share directory relative to wherever the app binary is. (Linux)
-/// - The Resources directory relative to wherever the app binary is. (macOS)
-/// - The same directory as the app binary. (Windows)
-QString findDBPath(const QString &defaultDBName)
+/// @brief Find a data file or directory next to the library and help databases.
+/// @param name The file or directory name to search for.
+/// @returns The path if found, or an empty string.
+/// @note Candidates, in order, relative to the real executable:
+/// - ../share/qlogo/ (Linux, and a qlogo binary installed in bin/)
+/// - ../Resources/ (macOS, qlogo inside Psychi.app)
+/// - the same directory (Windows)
+QString findDataPath(const QString &name)
 {
-    // Build a list of candidate locations to try.
-    QStringList candidates;
+    const QString launchedPath = QCoreApplication::applicationFilePath();
+    const QString resolvedPath = QFileInfo(launchedPath).canonicalFilePath();
     QString appDir = QCoreApplication::applicationDirPath();
+    if (!resolvedPath.isEmpty())
+        appDir = QFileInfo(resolvedPath).absolutePath();
 
-    // The share directory relative to wherever the app binary is. (Linux)
-    candidates << QDir::cleanPath(appDir + "/../share/qlogo/" + defaultDBName);
-    // The Resources directory relative to wherever the app binary is. (macOS)
-    candidates << QDir::cleanPath(appDir + "/../Resources/" + defaultDBName);
-    // The same directory as the app binary. (Windows)
-    candidates << QDir::cleanPath(appDir + "/" + defaultDBName);
+    QStringList candidates;
+    candidates << QDir::cleanPath(appDir + "/../share/qlogo/" + name);
+    candidates << QDir::cleanPath(appDir + "/../Resources/" + name);
+    candidates << QDir::cleanPath(appDir + "/" + name);
 
     for (auto &c : candidates)
     {
@@ -54,6 +54,33 @@ QString findDBPath(const QString &defaultDBName)
     }
 
     return {};
+}
+
+/// @brief Find the path to the database file.
+/// @param defaultDBName The default name of the database file.
+/// @returns The path to the database file, or an empty string if the file is not found.
+QString findDBPath(const QString &defaultDBName)
+{
+    return findDataPath(defaultDBName);
+}
+
+void initCslsDirectory()
+{
+    Config &cfg = Config::get();
+    if (!cfg.paramCslsDirectory_.isEmpty())
+    {
+        cfg.cslsDirectory_ = QDir::cleanPath(cfg.paramCslsDirectory_);
+        return;
+    }
+
+    const QString env = qEnvironmentVariable("CSLS");
+    if (!env.isEmpty())
+    {
+        cfg.cslsDirectory_ = QDir::cleanPath(env);
+        return;
+    }
+
+    cfg.cslsDirectory_ = findDataPath(QString::fromLatin1(cfg.defaultCslsDirName_));
 }
 
 /// @brief Initialize a database connection.
@@ -77,12 +104,29 @@ bool initDBConnection(const QString &connectionName, const QString &paramFilePat
     return isSuccessful;
 }
 
+void DatabaseConnection::closeConnection() const
+{
+    if (!connectionIsValid_)
+        return;
+
+    if (QCoreApplication::instance() == nullptr)
+    {
+        connectionIsValid_ = false;
+        return;
+    }
+
+    {
+        QSqlDatabase db = QSqlDatabase::database(connectionName_);
+        if (db.isOpen())
+            db.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName_);
+    connectionIsValid_ = false;
+}
+
 DatabaseConnection::~DatabaseConnection()
 {
-    if (connectionIsValid_)
-    {
-        QSqlDatabase::removeDatabase(connectionName_);
-    }
+    closeConnection();
 }
 
 void DatabaseConnection::getConnection() const
@@ -147,24 +191,23 @@ QString Library::procedureText(const QString &cmdName)
 
 QStringList Library::allProcedureNames() const
 {
-    // This is disabled to prevent confusion.
-    // We shouldn't read procedure names if we can't yet input procedure bodies.
+    if (namesLoaded_)
+        return allProcedures_;
 
-    // if (allProcedures.isEmpty())
-    // {
-    //     getConnection();
+    getConnection();
 
-    //     if (connectionIsValid)
-    //     {
-    //         QSqlDatabase db = QSqlDatabase::database(connectionName);
-    //         QSqlQuery query("SELECT COMMAND FROM LIBRARY", db);
-    //         while (query.next())
-    //         {
-    //             allProcedures.append(query.value(0).toString());
-    //         }
-    //     }
-    // }
-    return {}; // Return allProcedures;
+    if (connectionIsValid_)
+    {
+        QSqlDatabase db = QSqlDatabase::database(connectionName_);
+        QSqlQuery query(QStringLiteral("SELECT COMMAND FROM LIBRARY"), db);
+        while (query.next())
+        {
+            allProcedures_.append(query.value(0).toString().toUpper());
+        }
+    }
+
+    namesLoaded_ = true;
+    return allProcedures_;
 }
 
 Help::Help()
@@ -183,14 +226,33 @@ bool Help::validateSchema(const QStringList &tables) const
     return tables.contains("ALIASES", Qt::CaseSensitive) && tables.contains("HELPTEXT", Qt::CaseSensitive);
 }
 
-QStringList Help::allCommands()
+QStringList Help::commandsForCategory(const QString &category)
 {
     getConnection();
     QStringList retval;
     if (connectionIsValid_)
     {
         QSqlDatabase db = QSqlDatabase::database(connectionName_);
-        QSqlQuery query("SELECT ALIAS FROM ALIASES", db);
+        QSqlQuery query(db);
+        query.prepare("SELECT ALIAS FROM ALIASES WHERE CATEGORY = ? ORDER BY ALIAS");
+        query.addBindValue(category);
+        query.exec();
+        while (query.next())
+        {
+            retval.append(query.value(0).toString());
+        }
+    }
+    return retval;
+}
+
+QStringList Help::allCategories()
+{
+    getConnection();
+    QStringList retval;
+    if (connectionIsValid_)
+    {
+        QSqlDatabase db = QSqlDatabase::database(connectionName_);
+        QSqlQuery query("SELECT DISTINCT CATEGORY FROM ALIASES ORDER BY CATEGORY", db);
         while (query.next())
         {
             retval.append(query.value(0).toString());

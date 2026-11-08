@@ -1,0 +1,10 @@
+trace "foo
+trace [bar baz]
+trace [[a1] [q] [1 2]]
+trace [[] [q] [1 2]]
+trace [[a1] [] [1 2]]
+trace [[a1] [q] [1]]
+trace [[a1]]
+trace []
+trace [[] "q]
+trace "foo

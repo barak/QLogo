@@ -19,11 +19,14 @@
 
 #include "interface/logointerfacegui.h"
 #include "interface/pipeio.h"
-#include <QCoreApplication>
+#include "workspace/kernel.h"
+#include "workspace/specialvars.h"
 #include <QByteArray>
+#include <QCoreApplication>
 #include <QDataStream>
 #include <QMatrix4x4>
 #include <QTransform>
+#include <limits>
 
 qint64 StdoutMessageWriter::write(const QByteArray &buffer)
 {
@@ -35,7 +38,7 @@ qint64 StdoutMessageWriter::write(const QByteArray &buffer)
 LogoInterfaceGUI::LogoInterfaceGUI(QObject *parent) : LogoInterface(parent)
 {
     // That dreaded \r\n <-> \n problem (no-op on Unix)
-setStdioBinaryMode();
+    setStdioBinaryMode();
 }
 
 void LogoInterfaceGUI::closeInterface()
@@ -47,12 +50,13 @@ void LogoInterfaceGUI::closeInterface()
 
 LogoInterfaceGUI::~LogoInterfaceGUI() = default;
 
-void LogoInterfaceGUI::initialize()
+bool LogoInterfaceGUI::initialize()
 {
     messageQueue_.startQueue();
 
     message(W_INITIALIZE);
     waitForMessage(W_INITIALIZE);
+    return true;
 }
 
 /* a message has three parts:
@@ -82,13 +86,15 @@ message_t LogoInterfaceGUI::getMessage()
         break;
     }
     case S_SYSTEM:
-        throw FCError::custom(DatumPtr(QObject::tr("SYSTEM")));
+        LogoInterface::noteSignal(systemSignal);
         break;
     case S_TOPLEVEL:
-        throw FCError::custom(DatumPtr(QObject::tr("TOPLEVEL")));
+        LogoInterface::noteSignal(toplevelSignal);
         break;
     case S_PAUSE:
-        throw FCError::custom(DatumPtr(QObject::tr("PAUSE")));
+        LogoInterface::noteSignal(pauseSignal);
+        break;
+    case W_TIMER_END:
         break;
     case C_CONSOLE_RAWLINE_READ:
         bufferStream >> rawLine_;
@@ -96,11 +102,18 @@ message_t LogoInterfaceGUI::getMessage()
     case C_CONSOLE_CHAR_READ:
         bufferStream >> rawChar_;
         break;
+    case C_CONSOLE_KEY_EVENT:
+        bufferStream >> rawChar_;
+        if (Kernel::get().armPendingAct(SpecialVars::Id::KeyAct))
+            typeahead_.prepend(QString(rawChar_));
+        else
+            typeahead_.enqueue(QString(rawChar_));
+        break;
     case W_FILE_DIALOG_GET_PATH:
         bufferStream >> filePath_;
         break;
     case C_CONSOLE_END_EDIT_TEXT:
-        bufferStream >> editorText_;
+        bufferStream >> editorAccepted_ >> editorText_;
         break;
     case C_CONSOLE_TEXT_CURSOR_POS:
         bufferStream >> cursorRow_ >> cursorCol_;
@@ -114,6 +127,7 @@ message_t LogoInterfaceGUI::getMessage()
     case C_CANVAS_MOUSE_BUTTON_DOWN:
         bufferStream >> clickPos_ >> lastButtonpressID_;
         isMouseButtonDown_ = true;
+        Kernel::get().armPendingAct(SpecialVars::Id::ButtonAct);
         break;
     case C_CANVAS_MOUSE_BUTTON_UP:
         isMouseButtonDown_ = false;
@@ -143,6 +157,21 @@ void LogoInterfaceGUI::waitForMessage(message_t expectedType)
     do
     {
         type = getMessage();
+        Kernel::get().runPendingActAtPrompt();
+        // WAIT returns early so ECE can splice BUTTONACT/KEYACT. The stale
+        // W_TIMER_END is ignored later.
+        if (Kernel::get().hasPendingAct() && expectedType == W_TIMER_END)
+            return;
+        if (!LogoInterface::signalPending())
+            continue;
+        // Nested pause() would wait for a prompt and could swallow Psychi's
+        // timer reply, hanging WAIT. Return and let stdWait pause instead.
+        if (LogoInterface::lastSignal_.load(std::memory_order_relaxed) == pauseSignal &&
+            expectedType == W_TIMER_END)
+            return;
+        DatumPtr result;
+        if (Kernel::get().consumePendingSignal(&result) && result.isErr())
+            throw result.errValue();
     } while (type != expectedType);
 }
 
@@ -181,23 +210,14 @@ void LogoInterfaceGUI::setTextColor(const QColor &foregroundColor, const QColor 
     message(C_CONSOLE_SET_TEXT_COLOR) << foregroundColor << backgroundColor;
 }
 
-void LogoInterfaceGUI::setCursorOverwriteMode(bool isOverwriteMode)
+QString LogoInterfaceGUI::editText(const QString &startText, bool *accepted, const QString &title)
 {
-    cursorModeIsOverwrite_ = isOverwriteMode;
-    message(C_CONSOLE_SET_CURSOR_MODE) << isOverwriteMode;
-}
-
-bool LogoInterfaceGUI::cursorOverwriteMode() const
-{
-    return cursorModeIsOverwrite_;
-}
-
-QString LogoInterfaceGUI::editText(const QString &startText)
-{
-    message(C_CONSOLE_BEGIN_EDIT_TEXT) << startText;
+    message(C_CONSOLE_BEGIN_EDIT_TEXT) << title << startText;
 
     waitForMessage(C_CONSOLE_END_EDIT_TEXT);
 
+    if (accepted)
+        *accepted = editorAccepted_;
     return editorText_;
 }
 
@@ -236,13 +256,27 @@ QString LogoInterfaceGUI::inputRawlineWithPrompt(const QString &prompt)
     return rawLine_;
 }
 
+bool LogoInterfaceGUI::lineQueueHasLine()
+{
+    return keyQueueHasChars();
+}
+
+bool LogoInterfaceGUI::keyQueueHasChars()
+{
+    processInputMessageQueue();
+    return !typeahead_.isEmpty();
+}
+
 DatumPtr LogoInterfaceGUI::readchar()
 {
+    if (!typeahead_.isEmpty())
+        return DatumPtr(typeahead_.dequeue());
+
     message(C_CONSOLE_REQUEST_CHAR);
 
     waitForMessage(C_CONSOLE_CHAR_READ);
 
-    return DatumPtr(rawChar_);
+    return DatumPtr(QString(rawChar_));
 }
 
 QString LogoInterfaceGUI::fileDialogModal()
@@ -432,10 +466,43 @@ void LogoInterfaceGUI::setBounds(double x, double y)
     message(C_CANVAS_SETBOUNDS) << (qreal)xbound_ << (qreal)ybound_;
 }
 
+void LogoInterfaceGUI::setScrunch(double x, double y)
+{
+    if ((scrunchX_ == x) && (scrunchY_ == y))
+        return;
+    scrunchX_ = x;
+    scrunchY_ = y;
+    message(C_CANVAS_SET_SCRUNCH) << (qreal)scrunchX_ << (qreal)scrunchY_;
+}
+
 void LogoInterfaceGUI::setPensize(qreal aSize)
 {
     if (aSize == penSize_)
         return;
     message(C_CANVAS_SET_PENSIZE) << (qreal)aSize;
     penSize_ = aSize;
+}
+
+void LogoInterfaceGUI::setPenPattern(Qt::PenStyle style,
+                                     Qt::PenCapStyle cap,
+                                     Qt::PenJoinStyle join,
+                                     const QList<qreal> &dashPattern)
+{
+    if (style == penStyle_ && cap == penCapStyle_ && join == penJoinStyle_ && dashPattern == penDashPattern_)
+        return;
+    message(C_CANVAS_SET_PENPATTERN) << style << cap << join << dashPattern;
+    penStyle_ = style;
+    penCapStyle_ = cap;
+    penJoinStyle_ = join;
+    penDashPattern_ = dashPattern;
+}
+
+void LogoInterfaceGUI::mwait(unsigned long msecs)
+{
+    qint32 ms = std::numeric_limits<qint32>::max();
+    if (msecs < static_cast<unsigned long>(std::numeric_limits<qint32>::max()))
+        ms = static_cast<qint32>(msecs);
+
+    message(W_TIMER_START) << ms;
+    waitForMessage(W_TIMER_END);
 }

@@ -23,6 +23,7 @@
 #include <QStaticText>
 #include <QVariant>
 #include <QWidget>
+#include <variant>
 
 class MainWindow;
 
@@ -37,7 +38,8 @@ struct Label
     /// @param aText The text to display.
     /// @param aPosition The position to display the text.
     /// @param aFont The font to use for the text.
-    Label(const QString &aText, QPointF aPosition, const QFont &aFont) : text_(aText), position_(aPosition), font_(aFont)
+    Label(const QString &aText, QPointF aPosition, const QFont &aFont)
+        : position_(aPosition), text_(aText), font_(aFont)
     {
     }
 };
@@ -58,7 +60,7 @@ struct TurtleWriteInfo
     QPainter::CompositionMode composingMode_;
     /// @brief The pen to use for drawing.
     ///
-    /// The only relevant fields are color and width.
+    /// Color, width, style, cap, join, and, perhaps, dash pattern.
     QPen pen_;
 };
 
@@ -68,7 +70,7 @@ struct Arc
     QRectF rectangle_;
     int startAngle_;
     int spanAngle_;
-    Arc(QPointF center, qreal a, qreal span, qreal radius);
+    Arc(QPointF center, qreal a, qreal span, qreal radiusX, qreal radiusY);
 };
 
 /// @brief A variant type that can hold any of the drawing element types.
@@ -80,23 +82,6 @@ struct Arc
 /// - QPolygonF - A polyline.
 /// - Arc - An arc.
 using DrawingElementVariant = std::variant<Label, Polygon, TurtleWriteInfo, QPolygonF, Arc>;
-
-/// @brief An ID for each type of drawing element.
-enum DrawingElementID
-{
-    DrawingElementIDLabel,
-    DrawingElementIDPolygon,
-    DrawingElementIDTurtle,
-    DrawingElementIDPolyline,
-    DrawingElementIDArc
-};
-
-/// The variant structure for the individual drawing elements.
-struct DrawingElement
-{
-    DrawingElementID elementID_;
-    DrawingElementVariant element_;
-};
 
 /// @brief The canvas widget, the main widget for the turtle graphics.
 ///
@@ -123,6 +108,10 @@ class Canvas : public QWidget
     // Visible vertices on the Y axis range from -boundsY to +boundsY
     qreal boundsY_;
 
+    // Display-space scrunch. Translation in turtleMatrix_ is in display units.
+    qreal scrunchX_ = 1.0;
+    qreal scrunchY_ = 1.0;
+
     QColor foregroundColor_;
     QColor backgroundColor_;
     TurtleWriteInfo currentWriteInfo_;
@@ -130,7 +119,7 @@ class Canvas : public QWidget
     bool penIsDown_ = true;
 
     // The main data structure for all of the drawn elements on the canvas.
-    QList<DrawingElement> drawingElementList_;
+    QList<DrawingElementVariant> drawingElementList_;
 
     // The currently-constructing line sequence.
     QPolygonF lineGroup_;
@@ -142,26 +131,23 @@ class Canvas : public QWidget
 
     QImage backgroundImage_;
 
-    // The QPainter object. This is only valid during the paintEvent().
-    QPainter *painter;
-
     // The current label drawing font
     QFont labelFont_;
 
     void initDrawingElementList();
     void initTurtleImage();
 
-    void drawCanvas();
+    void drawCanvas(QPainter &painter) const;
 
-    void elementListSetWriteInfo(const TurtleWriteInfo &info);
-    void elementListDrawBoundedBackground();
-    void elementListDrawUnboundedBackground();
-    void elementListDrawBackgroundImage();
-    void elementListDrawTurtle();
-    void elementListDrawPolyline(const QPolygonF &);
-    void elementListDrawPolygon(const Polygon &p);
-    void elementListDrawLabel(const Label &);
-    void elementListDrawArc(const Arc &a);
+    void elementListSetWriteInfo(QPainter &painter, const TurtleWriteInfo &info) const;
+    void elementListDrawBoundedBackground(QPainter &painter) const;
+    void elementListDrawUnboundedBackground(QPainter &painter) const;
+    void elementListDrawBackgroundImage(QPainter &painter) const;
+    void elementListDrawTurtle(QPainter &painter) const;
+    void elementListDrawPolyline(QPainter &painter, const QPolygonF &) const;
+    void elementListDrawPolygon(QPainter &painter, const Polygon &p) const;
+    void elementListDrawLabel(QPainter &painter, const Label &) const;
+    void elementListDrawArc(QPainter &painter, const Arc &a) const;
 
     const QColor &colorForCurrentPenmode();
 
@@ -221,18 +207,22 @@ class Canvas : public QWidget
     /// @brief Add an arc using the specified angle and radius.
     ///
     /// @param angle The angle of the arc.
-    /// @param radius The radius of the arc.
-    /// @note the starting angle is the current turtle orientation.
+    /// @param radius The logical radius of the arc.
+    /// @note The starting angle is the current turtle orientation. The
+    /// bounding rectangle is stretched by the current scrunch so a circle
+    /// in logical space is an ellipse in display space.
     void addArc(qreal angle, qreal radius);
 
     /// @brief Add a label at the current turtle location.
     ///
     /// @param aText The text to display.
+    /// @note The recorded font height is the logical size times the current
+    /// Y scrunch. LABELSIZE is unaffected.
     void addLabel(const QString &aText);
 
-    /// @brief Set the font size for all future text labels.
+    /// @brief Set the logical font size for all future text labels.
     ///
-    /// @param aSize The new font size.
+    /// @param aSize The new font size (SETLABELHEIGHT / LABELSIZE).
     void setLabelFontSize(qreal aSize);
 
     /// @brief Set the font name for all future text labels.
@@ -257,6 +247,16 @@ class Canvas : public QWidget
     /// @param aSize The new pen size.
     void setPensize(qreal aSize);
 
+    /// @brief Set the style, cap, join, and optional dash pattern of future lines.
+    ///
+    /// @param style The Qt pen style.
+    /// @param cap The Qt pen cap style.
+    /// @param join The Qt pen join style.
+    /// @param dashPattern Dash lengths used only when style is Qt::CustomDashLine.
+    ///        An odd-length list is accepted; the first length is reused as the
+    ///        missing gap when the pattern repeats.
+    void setPenPattern(Qt::PenStyle style, Qt::PenCapStyle cap, Qt::PenJoinStyle join, const QList<qreal> &dashPattern);
+
     /// @brief Set the background color.
     ///
     /// @param c The new background color.
@@ -275,12 +275,12 @@ class Canvas : public QWidget
     /// @brief Redraw the canvas onto an image object and return it.
     ///
     /// @return The image of the canvas.
-    QImage getImage();
+    QImage getImage() const;
 
     /// @brief Draw the canvas onto an SVG object string and return it.
     ///
     /// @return The SVG string of the canvas.
-    QByteArray getSvg();
+    QByteArray getSvg() const;
 
     /// @brief Clears the screen and removes all painting elements from the paintList.
     void clearScreen();
@@ -290,7 +290,7 @@ class Canvas : public QWidget
     /// @return The maximum X bound
     /// @note The origin is always the center of the widget, therefore the
     /// minimum X bound is negative of the maximum.
-    qreal xbound()
+    qreal xbound() const
     {
         return boundsX_;
     }
@@ -300,7 +300,7 @@ class Canvas : public QWidget
     /// @return The maximum Y bound
     /// @note The origin is always the center of the widget, therefore the
     /// minimum Y bound is negative of the maximum.
-    qreal ybound()
+    qreal ybound() const
     {
         return boundsY_;
     }
@@ -312,6 +312,24 @@ class Canvas : public QWidget
     /// @note The origin is always the center of the widget, therefore the
     /// minimum X and Y bounds are the negatives of their maximum values.
     void setBounds(qreal x, qreal y);
+
+    /// @brief Set the display-space scrunch factors.
+    /// @param x The X scale factor.
+    /// @param y The Y scale factor.
+    /// @note Does not restretch already-drawn ink. The turtle icon is redrawn.
+    void setScrunch(qreal x, qreal y);
+
+    /// @brief The current X scrunch factor.
+    qreal scrunchX() const
+    {
+        return scrunchX_;
+    }
+
+    /// @brief The current Y scrunch factor.
+    qreal scrunchY() const
+    {
+        return scrunchY_;
+    }
 
     /// @brief Set whether the view should use the whole widget or a box within.
     ///
@@ -329,7 +347,7 @@ class Canvas : public QWidget
     ///
     /// @return True if the canvas is drawn "bounded". See setIsBounded() for
     /// more details.
-    bool isBounded()
+    bool isBounded() const
     {
         return canvasIsBounded_;
     }

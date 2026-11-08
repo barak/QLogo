@@ -19,6 +19,9 @@
 
 #include <QMainWindow>
 #include <QTextCharFormat>
+#include <memory>
+
+class QCloseEvent;
 
 namespace Ui
 {
@@ -28,14 +31,18 @@ class EditorWindow;
 /// @brief The editor window.
 ///
 /// This class is the editor window for the QLogo GUI. It is a QMainWindow that
-/// contains a QTextEdit widget to edit text when the user requests to edit the
-/// text.
+/// contains a QPlainTextEdit widget to edit text.
 class EditorWindow : public QMainWindow
 {
     Q_OBJECT
 
-    Ui::EditorWindow *ui_;
+    std::unique_ptr<Ui::EditorWindow> ui_;
+    bool ended_ = false;
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void closeEvent(QCloseEvent *event) override;
+    void finish(bool accepted);
+    void acceptChanges();
+    void revertChanges();
 
   public:
     /// @brief Constructor.
@@ -67,21 +74,9 @@ class EditorWindow : public QMainWindow
     ///
     /// This signal is emitted when the user has ended editing the text.
     ///
-    /// @param text The text that the user has edited. May be an empty string if
-    /// the user cancelled the editing.
-    void editingHasEndedSignal(QString text);
-
-  public slots:
-
-    /// @brief Accept the changes.
-    ///
-    /// This function is called when the user accepts the changes to the text.
-    void acceptChanges();
-
-    /// @brief Revert the changes.
-    ///
-    /// This function is called when the user cancels the editing.
-    void revertChanges();
+    /// @param accepted True if the user saved, false if they reverted or closed.
+    /// @param text The edited text if saved; empty if reverted.
+    void editingHasEndedSignal(bool accepted, const QString &text);
 };
 
 #endif // EDITORWINDOW_H

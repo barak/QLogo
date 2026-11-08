@@ -88,12 +88,26 @@ struct FCReturn : public FlowControl
 struct FCContinuation : public FlowControl
 {
 
-    FCContinuation(const DatumPtr &aSourceNode, const DatumPtr &aProcedure, const QList<DatumPtr> &aParams)
+    /// @brief True when this tail call is in command position (STOP).
+    /// @details The continued procedure may not output a value. OUTPUT and
+    /// .MAYBEOUTPUT leave this false so a value is the caller's output.
+    bool demandNothing_ = false;
+
+    /// @brief True when no output from the continued procedure is acceptable.
+    bool allowNothing_ = false;
+
+    FCContinuation(const DatumPtr &aSourceNode,
+                   const DatumPtr &aProcedure,
+                   const QList<DatumPtr> &aParams,
+                   bool demandNothing = false,
+                   bool allowNothing = false)
     {
         isa_ = Datum::typeContinuation;
         data_ = aProcedure;
         dataAry_ = aParams;
         sourceNode_ = aSourceNode;
+        demandNothing_ = demandNothing;
+        allowNothing_ = allowNothing;
     }
 
     /// @brief The procedure to continue.
@@ -228,6 +242,11 @@ struct FCError : public FlowControl
         return dataAry_[3];
     }
 
+    /// @brief True when @ref line was taken from an instruction list.
+    /// @details The line slot defaults to the empty list. That default is not printed
+    /// with the error message. An instruction that was actually empty still is.
+    bool lineCaptured_ = false;
+
     /// @brief The procedure where the error occurred.
     DatumPtr &procedure()
     {
@@ -284,12 +303,14 @@ struct FCError : public FlowControl
         commonInit();
     }
 
-    /// @brief Create an error object for a custom error.
-    /// @param tag The tag of the error. Can be used with `CATCH tag` and/or `SYSTEM/TOPLEVEL/PAUSE` to handle the
-    /// error.
-    /// @param message An optional message to accompany the error.
-    /// @param output An optional output to accompany the error.
-    static FCError *custom(const DatumPtr &tag, DatumPtr message = nothing(), const DatumPtr &output = nothing());
+    /// @brief Create the error object for THROW.
+    /// @param tag The throw tag.
+    /// @param second The optional second input. For THROW "ERROR this is the message
+    /// text, and CATCH "ERROR does not output it. A non-word is stored as its print
+    /// form, one word that may contain spaces. For any other tag, CATCH outputs it.
+    /// @details One-input THROW "ERROR is code 21. Two-input THROW "ERROR is code 35.
+    /// Any other tag with no matching CATCH is code 14.
+    static FCError *fromThrow(const DatumPtr &tag, const DatumPtr &second = nothing());
 
     /// @brief Create an error object for a fatal internal error.
     /// @details This is an error so bad that it cannot be caught.
@@ -358,6 +379,14 @@ struct FCError : public FlowControl
     /// @param x The variable that has no value.
     static FCError *noValue(const DatumPtr &x);
 
+    /// @brief A macro output something other than a list of instructions.
+    /// @param value The value the macro output, or nothing if it did not output.
+    static FCError *macroReturnedNotList(const DatumPtr &value);
+
+    /// @brief A macro used as an input output more than one expression.
+    /// @param runlist The list the macro output.
+    static FCError *multipleExpressions(const DatumPtr &runlist);
+
     /// @brief Create an error object for trying to nest FILLED blocks.
     static FCError *alreadyFilling();
 
@@ -372,9 +401,27 @@ struct FCError : public FlowControl
     /// @brief Create an error object for a closing parenthesis not found when expected during parsing.
     static FCError *parenNf();
 
+    /// @brief Create an error object for C++ or Logo stack overflow.
+    static FCError *stackOverflow();
+
     /// @brief Create an error object for trying to manipulate a primitive.
     /// @param x The primitive that is being manipulated.
     static FCError *isPrimitive(const DatumPtr &x);
+
+    /// @brief Create an error object for attempting to dribble while already dribbling.
+    static FCError *alreadyDribbling();
+
+    /// @brief Create an error object for a file that is not open.
+    /// @param x The file that is not open.
+    static FCError *notOpen(const DatumPtr &x);
+
+    /// @brief Create an error object for a file that is already open.
+    /// @param x The file that is already open.
+    static FCError *alreadyOpen(const DatumPtr &x);
+
+    /// @brief Create an error object for a file that cannot be opened.
+    /// @param x The file that cannot be opened.
+    static FCError *cantOpen(const DatumPtr &x);
 
     /// @brief Return a string suitable for the PRINT command
     ///

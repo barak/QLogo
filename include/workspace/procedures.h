@@ -19,11 +19,15 @@
 
 #include "compiler_types.h"
 #include "datum_ptr.h"
+#include "datum_types.h"
 #include <QHash>
+#include <QList>
+
+class TextStream;
 
 /// @brief A structure to hold a command's details for the treeifyer.
 /// @note This is used to map a command name to its method, minimum, default, maximum
-/// parameter counts, and return data type.
+/// parameter counts, and produced value type(s).
 struct Cmd_t
 {
     /// @brief The compiler method to generate code for this command.
@@ -41,8 +45,8 @@ struct Cmd_t
     /// @note -1 means unlimited.
     int countOfMaxParams_;
 
-    /// @brief The data type(s) that this procedure is expected to return.
-    RequestReturnType returnType_;
+    /// @brief The type(s) of value this procedure produces.
+    TypeMask produces_;
 };
 
 /// @brief The procedures class.
@@ -53,10 +57,19 @@ class Procedures
     QHash<QString, Cmd_t> stringToCmd;
 
     QHash<QString, DatumPtr> procedures_;
-    qint64 lastProcedureCreatedTimestamp_;
 
-    DatumPtr procedureForName(const QString &aName) const;
+    DatumPtr procedureForName(const QString &aName);
     bool isNamedProcedure(const QString &aName) const;
+
+    /// @brief Load a library row into the procedure table.
+    /// @param aName The Key-form name of the LIBRARY.COMMAND to load.
+    /// @return False if there is no CODE for that name. True if a row was ingested.
+    /// @details Runs the row through Kernel::loadText so TO / .MACRO, BURY, and
+    /// any other top-level commands share LOAD's rules. One row may define
+    /// several procedures. A TO in the row may replace a user procedure;
+    /// primitives are still rejected. Does not print "defined" unless
+    /// LOADNOISILY is TRUE.
+    bool loadLibraryProcedure(const QString &aName);
 
 
     /// @brief Private constructor for singleton pattern.
@@ -81,21 +94,23 @@ class Procedures
     /// @brief Destructor.
     ~Procedures() = default;
 
-    /// @brief Return the timestamp of the last procedure creation.
-    /// @return The timestamp of the last procedure creation.
-    qint64 timeOfLastProcedureCreation() const
-    {
-        return lastProcedureCreatedTimestamp_;
-    }
-
     /// @brief Validate a procedure parameters list.
     /// @param cmd The command to validate the parameters list for.
     /// @param argumentsList The arguments list to validate.
     /// @return A tuple representing the arity of the procedure. Throws an exception if the arguments list is invalid.
     std::tuple<int, int, int> validateParameters(const DatumPtr &cmd, const DatumPtr &parameterList) const;
 
+    /// @brief True if @p name is a word DEFINE will accept as a procedure name.
+    /// @details False if it is not a word, if it is a number, or if it starts with
+    /// '"' or ':'. A primitive of that name is a separate error.
+    bool isDefinableProcName(const DatumPtr &name) const;
+
+    /// @brief True if @p text is a non-empty list whose members are all lists.
+    /// Parameter-list grammar is not checked.
+    bool isDefineText(const DatumPtr &text) const;
+
     /// @brief Create a Procedure object and save it to the procedures hash table.
-    /// @param cmd The command used to define the procedure (TO or .MACRO).
+    /// @param cmd The command used to define the procedure (TO, .MACRO, DEFINE, or .DEFMACRO).
     /// @param procnameP The name of the procedure to define.
     /// @param text The text to define a procedure from, in the form of a list of sublists.
     /// @param sourceText The source text to define a procedure from, or an empty list if there
@@ -105,10 +120,30 @@ class Procedures
                          const DatumPtr &text,
                          const QList<DatumPtr> &sourceText);
 
+    /// @brief Strip ':' and '"' from a TO / .MACRO formal.
+    /// @param cmd The defining command, used if the formal is rejected.
+    /// @param parameter A word, or a list whose first member is the input name.
+    static DatumPtr cleanFormal(const DatumPtr &cmd, const DatumPtr &parameter);
+
+    /// @brief Read instruction lines from a stream until END or EOF.
+    /// @param reader The stream (commander, string buffer, or file).
+    /// @param textBuilder Parameter list already appended; body lines are appended.
+    /// @param sourceText Raw lines; each body line (including empty and END) is appended.
+    /// @param prompt Shown only when @p reader is the terminal.
+    static void readProcedureBody(TextStream &reader,
+                                  ListBuilder &textBuilder,
+                                  QList<DatumPtr> &sourceText,
+                                  const QString &prompt);
+
     /// @brief Copy a procedure to a new name.
+    /// @param cmd The COPYDEF command, used when an input is rejected.
     /// @param newnameP The new name to copy the procedure to.
-    /// @param oldnameP The name of the procedure to copy.
-    void copyProcedure(const DatumPtr &newnameP, const DatumPtr &oldnameP);
+    /// @param oldnameP The name of the procedure to copy. May be a primitive.
+    /// @details A user procedure is copied as its own procedure, with the same
+    /// body and with the new name in its source title. A primitive is aliased,
+    /// and the new name is then itself a primitive. The new name must not
+    /// already be a primitive.
+    void copyProcedure(const DatumPtr &cmd, const DatumPtr &newnameP, const DatumPtr &oldnameP);
 
     /// @brief Erase a procedure.
     /// @param procnameP The name of the procedure to erase.
@@ -118,7 +153,7 @@ class Procedures
     /// @param cmdP The name of the procedure to search for.
     /// @return A tuple containing a pointer to the created AST node, and three integers representing the arity of the procedure.
     ///         If the procedure is not found, returns a tuple with nothing() as the first element.
-    std::tuple<DatumPtr, int, int, int> astnodeFromProcedure(const DatumPtr &cmdP) const;
+    std::tuple<DatumPtr, int, int, int> astnodeFromProcedure(const DatumPtr &cmdP);
 
     /// @brief Get an AST node from a primitive command.
     /// @param cmdP The name of the command to search for.
@@ -129,25 +164,40 @@ class Procedures
     /// @brief Get an AST node from a command, either a primitive or user-defined procedure.
     /// @param command The name of the command to search for.
     /// @return A tuple containing a pointer to the created AST node, and three integers representing the arity of the command.
-    std::tuple<DatumPtr, int, int, int> astnodeFromCommand(const DatumPtr &command) const;
+    /// @details If the name is not a primitive or procedure and ALLOWGETSET is TRUE,
+    /// a SET-prefixed name of at least four characters is a setter (arity 1) and
+    /// any other name is a getter (arity 0). Existence of the variable is not
+    /// checked here.
+    std::tuple<DatumPtr, int, int, int> astnodeFromCommand(const DatumPtr &command);
 
     /// @brief Get the text of a procedure.
     /// @param procnameP The name of the procedure to get the text of.
     /// @return A pointer to the text of the procedure, in the form of a list of sublists.
-    DatumPtr procedureText(const DatumPtr &procnameP) const;
+    DatumPtr procedureText(const DatumPtr &procnameP);
 
     /// @brief Get the full text of a procedure.
     /// @param procnameP The name of the procedure to get the full text of.
     /// @param shouldValidate Whether to validate the procedure.
-    /// @return A list of the full text of the procedure, in the form of a list of
-    /// words.
-    DatumPtr procedureFulltext(const DatumPtr &procnameP, bool shouldValidate = true) const;
+    /// @return For a procedure defined with TO or .MACRO, a list of words, one raw
+    /// source line each, including END. For a procedure defined with DEFINE or
+    /// .DEFMACRO, a list of lists: a generated title line, one list per body line,
+    /// and a final [end] list. That result is not suitable as input to DEFINE.
+    /// If shouldValidate is false and the name is undefined, a two-word stand-in
+    /// list (a TO line and END) is returned instead of an error.
+    DatumPtr procedureFulltext(const DatumPtr &procnameP, bool shouldValidate = true);
 
     /// @brief Generate the title line of a procedure.
     /// @param procnameP The name of the procedure to generate the title line for.
-    /// @return A string containing the title of the procedure. A title is the first line
-    /// of the procedure's source text, starting with 'to' or '.macro'.
-    QString generateProcedureTitleLine(const DatumPtr &procnameP) const;
+    /// @return A string containing the title of the procedure. A title starts with
+    /// 'to' or '.macro', then the name, then the inputs in TO syntax (colons on
+    /// input names).
+    QString generateProcedureTitleLine(const DatumPtr &procnameP);
+
+    /// @brief The title of a procedure as a list of words and sublists.
+    /// @param procnameP The name of the procedure.
+    /// @return [to-or-.macro name :input1 [:optional default] [:rest] defaultcount].
+    /// A primitive or unknown name is an error.
+    DatumPtr procedureTitleList(const DatumPtr &procnameP);
 
     /// @brief Check if a name is a procedure.
     /// @param procname The name to check.
@@ -164,15 +214,18 @@ class Procedures
     /// @return True if the name is a primitive, false otherwise.
     bool isPrimitive(const QString &procname) const;
 
-    /// @brief Check if a name is defined.
+    /// @brief Check if a name is a user-defined procedure.
     /// @param procname The name to check.
-    /// @return True if the name is defined, false otherwise.
-    /// @note This checks both user-defined and primitive procedures.
+    /// @return True if the name is a user-defined procedure. Primitives and
+    /// unknown names are false. A library procedure counts once it has been
+    /// installed in the procedure table.
     bool isDefined(const QString &procname) const;
 
-    /// @brief Get all procedure names.
-    /// @return A pointer to a list of all procedure names.
-    DatumPtr allProcedureNames() const;
+    /// @brief Names of user-defined procedures.
+    /// @param unburiedOnly When true, omit a procedure that is buried.
+    /// @return A list of words. Primitives are omitted. A buried procedure is
+    /// omitted until it is unburied. Traced and stepped procedures are included.
+    DatumPtr allProcedureNames(bool unburiedOnly = false) const;
 
     /// @brief Get all primitive procedure names.
     /// @return A pointer to a list of all primitive procedure names.

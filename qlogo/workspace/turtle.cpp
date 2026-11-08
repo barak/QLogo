@@ -278,8 +278,8 @@ Datum* Turtle::forward(double steps)
                            turtleTransform_.m21(),
                            turtleTransform_.m22(),
                            turtleTransform_.m23(),
-                           turtleTransform_.dx() + steps * turtleTransform_.m21(),
-                           turtleTransform_.dy() + steps * turtleTransform_.m22(),
+                           turtleTransform_.dx() + steps * turtleTransform_.m21() * scaleX_,
+                           turtleTransform_.dy() + steps * turtleTransform_.m22() * scaleY_,
                            turtleTransform_.m33());
     return moveTurtle(newTransform);
 }
@@ -295,7 +295,7 @@ void Turtle::rotate(double angle)
 
 QPointF Turtle::getxy() const
 {
-    return {turtleTransform_.dx(), turtleTransform_.dy()};
+    return {turtleTransform_.dx() / scaleX_, turtleTransform_.dy() / scaleY_};
 }
 
 void Turtle::setMode(TurtleModeEnum newMode)
@@ -341,22 +341,20 @@ Datum* Turtle::setxy(double x, double y)
                            turtleTransform_.m21(),
                            turtleTransform_.m22(),
                            turtleTransform_.m23(),
-                           x,
-                           y,
+                           x * scaleX_,
+                           y * scaleY_,
                            turtleTransform_.m33());
     return moveTurtle(newTransform);
 }
 
 Datum* Turtle::setx(double x)
 {
-    double y = turtleTransform_.dy();
-    return setxy(x, y);
+    return setxy(x, getxy().y());
 }
 
 Datum* Turtle::sety(double y)
 {
-    double x = turtleTransform_.dx();
-    return setxy(x, y);
+    return setxy(getxy().x(), y);
 }
 
 void Turtle::moveToHome()
@@ -382,18 +380,18 @@ QSizeF Turtle::getScale() const
 
 void Turtle::setScale(double newScaleX, double newScaleY)
 {
-    Q_ASSERT(std::abs(scaleX_) > std::numeric_limits<double>::epsilon());
-    Q_ASSERT(std::abs(scaleY_) > std::numeric_limits<double>::epsilon());
+    if (!std::isfinite(newScaleX) || !std::isfinite(newScaleY) ||
+        std::abs(newScaleX) <= std::numeric_limits<double>::epsilon() ||
+        std::abs(newScaleY) <= std::numeric_limits<double>::epsilon())
+        return;
 
-    double ratioX = newScaleX / scaleX_;
-    double ratioY = newScaleY / scaleY_;
-
-    turtleTransform_.scale(ratioX, ratioY);
+    if (newScaleX == scaleX_ && newScaleY == scaleY_)
+        return;
 
     scaleX_ = newScaleX;
     scaleY_ = newScaleY;
 
-    Config::get().mainInterface()->setTurtlePos(&turtleTransform_);
+    Config::get().mainInterface()->setScrunch(scaleX_, scaleY_);
 }
 
 void Turtle::setPenMode(PenModeEnum aPenMode)
@@ -416,6 +414,20 @@ void Turtle::setPenSize(double aPenSize)
     Config::get().mainInterface()->setPensize(penSize_);
 }
 
+void Turtle::setPenPattern(Qt::PenStyle style, Qt::PenCapStyle cap, Qt::PenJoinStyle join,
+                           const QList<qreal> &dashPattern)
+{
+    const QList<qreal> normalizedDash = (style == Qt::CustomDashLine) ? dashPattern : QList<qreal>{};
+    if (penStyle_ == style && penCapStyle_ == cap && penJoinStyle_ == join && penDashPattern_ == normalizedDash)
+        return;
+
+    penStyle_ = style;
+    penCapStyle_ = cap;
+    penJoinStyle_ = join;
+    penDashPattern_ = normalizedDash;
+    Config::get().mainInterface()->setPenPattern(penStyle_, penCapStyle_, penJoinStyle_, penDashPattern_);
+}
+
 bool Turtle::isPenSizeValid(double aPenSize) const
 {
     return Config::get().mainInterface()->isPenSizeValid(aPenSize);
@@ -426,15 +438,14 @@ double Turtle::getPenSize() const
     return penSize_;
 }
 
-void Turtle::beginFillWithColor(const QColor &fillColor)
+Datum* Turtle::beginFillWithColor(const QColor &fillColor)
 {
     if (isFilling_)
-    {
-        throw FCError::alreadyFilling();
-    }
+        return FCError::alreadyFilling();
     isFilling_ = true;
 
     Config::get().mainInterface()->beginPolygon(fillColor);
+    return nullptr;
 }
 
 void Turtle::endFill()

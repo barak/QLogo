@@ -6,7 +6,15 @@ set(QLOGO_SOURCES
   compiler/compiler_workspacemanagement.cpp
   compiler/compiler_controlstructures.cpp
   compiler/compiler_graphics.cpp
-  compiler/compiler_specialvariables.cpp
+  exports/exports.cpp
+  exports/exports_arithmetic.cpp
+  exports/exports_communication.cpp
+  exports/exports_controlstructures.cpp
+  exports/exports_datastructureprimitives.cpp
+  exports/exports_graphics.cpp
+  exports/exports_specialvariables.cpp
+  exports/exports_workspacemanagement.cpp
+
   interface/inputqueue.cpp
   interface/logointerface.cpp
   interface/logointerfacegui.cpp
@@ -25,7 +33,6 @@ set(QLOGO_SOURCES
   workspace/library.cpp
   workspace/turtle.cpp
   workspace/evaluator.cpp
-  workspace/exports.cpp
   workspace/visited.cpp
   parser/treeifyer.cpp
   parser/runparser.cpp
@@ -34,16 +41,18 @@ set(QLOGO_SOURCES
   workspace/callframe.cpp
   workspace/procedures.cpp
   workspace/propertylists.cpp
+  workspace/specialvars.cpp
 
   ../include/sharedconstants.h
   ../include/cmd_strings.h
   ../include/compiler.h
-  ../include/compiler_internal.h
   ../include/compiler_types.h
   ../include/interface/inputqueue.h
   ../include/interface/pipeio.h
   ../include/interface/logointerface.h
   ../include/interface/logointerfacegui.h
+  ../include/interface/logointerfacecurses.h
+  ../include/interface/lineeditor.h
   ../include/interface/streammanager.h
   ../include/interface/textstream.h
   ../include/datum_core.h
@@ -52,9 +61,10 @@ set(QLOGO_SOURCES
   ../include/astnode.h
   ../include/flowcontrol.h
   ../include/workspace/kernel.h
-  ../include/primitives.h
+  ../include/primitives.inc
   ../include/workspace/evaluator.h
-  ../include/workspace/exports.h
+  ../include/workspace/exports.inc
+  ../include/workspace/exports_internal.h
   ../include/workspace/library.h
   ../include/workspace/turtle.h
   ../include/treeifyer.h
@@ -62,9 +72,10 @@ set(QLOGO_SOURCES
   ../include/op_strings.h
   ../include/workspace/visited.h
   ../include/workspace/callframe.h
-  ../include/workspace/primitivetable.h
+  ../include/workspace/primitivetable.inc
   ../include/workspace/procedures.h
   ../include/workspace/propertylists.h
+  ../include/workspace/specialvars.h
 )
 
 find_package(Qt6 REQUIRED COMPONENTS Sql)
@@ -75,8 +86,12 @@ if(MSVC)
   fix_llvm_windows_dia_sdk()
 endif()
 
+if(LLVM_PACKAGE_VERSION VERSION_LESS 21)
+  message(FATAL_ERROR
+    "LLVM 21 or newer is required (found ${LLVM_PACKAGE_VERSION} at ${LLVM_DIR})")
+endif()
+
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
-message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
 set(LLVM_DEFINITIONS_CLEANED)
 foreach(def ${LLVM_DEFINITIONS})
@@ -99,6 +114,7 @@ target_include_directories("${QLOGO_BIN}" PUBLIC
 target_compile_definitions("${QLOGO_BIN}" PRIVATE
   ${LLVM_DEFINITIONS_CLEANED}
   "LOGOVERSION=\"${PROJECT_VERSION}\""
+  "QLOGOVERSION=\"${QLOGO_VERSION}\""
 )
 
 target_compile_definitions("${QLOGO_BIN}" PRIVATE QT_FORCE_ASSERTS)
@@ -114,9 +130,9 @@ endif()
 # LLVM shared libraries (libLLVM) are not supported with the Microsoft
 # toolchain; USE_SHARED would try to link LLVM.lib, which is not built.
 if(MSVC)
-  llvm_config("${QLOGO_BIN}" support core orcjit native irreader)
+  llvm_config("${QLOGO_BIN}" support core orcjit orcdebugging native irreader)
 else()
-  llvm_config("${QLOGO_BIN}" USE_SHARED support core orcjit native irreader)
+  llvm_config("${QLOGO_BIN}" USE_SHARED support core orcjit orcdebugging native irreader)
 endif()
 
 if(APPLE)
@@ -144,6 +160,26 @@ else()
   )
 endif()
 
+if(NOT WIN32)
+  set(CURSES_NEED_NCURSES TRUE)
+  set(CURSES_NEED_WIDE TRUE)
+  find_package(Curses)
+  if(NOT CURSES_FOUND)
+    set(CURSES_NEED_WIDE FALSE)
+    find_package(Curses REQUIRED)
+  endif()
+  target_sources("${QLOGO_BIN}" PRIVATE
+    interface/logointerfacecurses.cpp
+    interface/lineeditor.cpp
+  )
+  target_include_directories("${QLOGO_BIN}" PRIVATE ${CURSES_INCLUDE_DIRS})
+  target_link_libraries("${QLOGO_BIN}" PRIVATE ${CURSES_LIBRARIES})
+  target_compile_definitions("${QLOGO_BIN}" PRIVATE QLOGO_HAS_CURSES)
+  set_property(SOURCE interface/logointerfacecurses.cpp APPEND PROPERTY
+    COMPILE_DEFINITIONS NCURSES_WIDECHAR=1
+  )
+endif()
+
 # Copy Qt runtime DLLs/plugins next to qlogo.exe so it can be run and
 # tested from the build tree without manually adjusting PATH.
 if(WIN32)
@@ -157,12 +193,15 @@ if(WIN32)
   add_custom_command(TARGET "${QLOGO_BIN}" POST_BUILD
     COMMAND
       "${CMAKE_COMMAND}" -E env
-      "PATH=${_qlogo_qt_bin_dir};$ENV{PATH}"
+      "PATH=${_qlogo_qt_bin_dir};$ENV{SystemRoot}\\System32;$ENV{SystemRoot}"
       "${WINDEPLOYQT_EXECUTABLE}"
       "$<IF:$<CONFIG:Debug>,--debug,--release>"
       --no-translations
       "$<TARGET_FILE:${QLOGO_BIN}>"
-    COMMENT "Deploying Qt runtime for ${QLOGO_BIN}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+      "${QLOGO_CSLS_SRC}"
+      "$<TARGET_FILE_DIR:${QLOGO_BIN}>/csls"
+    COMMENT "Deploying Qt runtime and CSLS files for ${QLOGO_BIN}"
     VERBATIM
   )
 endif()

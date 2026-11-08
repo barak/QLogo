@@ -6,6 +6,10 @@
 // modification, are permitted under the conditions specified in the
 // license found in the LICENSE file in the project root.
 //
+// The /***DOC ... COD***/ help text and the /***LIB ... BIL***/ Logo
+// library procedures in this file are licensed separately under the
+// GNU General Public License, version 3 only. See the COPYRIGHT file.
+//
 //===----------------------------------------------------------------------===//
 ///
 /// \file
@@ -16,50 +20,135 @@
 
 #include "compiler.h"
 #include "astnode.h"
-#include "compiler_internal.h"
-#include "llvm/ExecutionEngine/Orc/LLJIT.h"
-#include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
-#include "llvm/Support/Error.h"
-#include "flowcontrol.h"
 #include "datum_types.h"
-#include "workspace/exports.h"
+#include "flowcontrol.h"
+#include "interface/streammanager.h"
 #include "op_strings.h"
 #include "sharedconstants.h"
 #include "treeifyer.h"
 #include "workspace/callframe.h"
+#include "workspace/exports.inc"
 #include "workspace/kernel.h"
 #include "workspace/procedures.h"
-#include <string>
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringSwitch.h"
+#include "llvm/Analysis/CGSCCPassManager.h"
+#include "llvm/BinaryFormat/Dwarf.h"
+#include "llvm/ExecutionEngine/Orc/AbsoluteSymbols.h"
+#include "llvm/ExecutionEngine/Orc/Debugging/DebuggerSupport.h"
+#include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
+#include "llvm/ExecutionEngine/Orc/LLJIT.h"
+#include "llvm/ExecutionEngine/Orc/Mangling.h"
+#include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
+#include "llvm/IR/Argument.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/DIBuilder.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/MDBuilder.h"
+#include "llvm/IR/Metadata.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/Passes/OptimizationLevel.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/GraphWriter.h"
+#include "llvm/Support/ModRef.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Transforms/Coroutines/ABI.h"
+#include "llvm/Transforms/Coroutines/CoroCleanup.h"
+#include "llvm/Transforms/Coroutines/CoroEarly.h"
+#include "llvm/Transforms/Coroutines/CoroElide.h"
+#include "llvm/Transforms/Coroutines/CoroSplit.h"
+#include "llvm/Transforms/Coroutines/MaterializationUtils.h"
+#include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm/Transforms/Scalar/SROA.h"
+#include <QDateTime>
+#include <algorithm>
 #include <iostream>
+#include <optional>
+#include <string>
 #include <vector>
 
 std::vector<std::weak_ptr<CompiledText>> Compiler::liveCompiledTexts_;
 
-const char *dbgName(const char *enclosing, const char *name)
+std::string dbgName(const char *enclosing, const char *name)
 {
-    static bool shouldMangle = Config::get().showIR_ || Config::get().showCFG_ || Config::get().showModuleIR_;
-    if (shouldMangle)
-    {
-        static std::string storage;
-        storage = std::string(enclosing) + "_" + name;
-        return storage.c_str();
-    }
+    const Scaffold *scaff = Compiler::get().scaff_;
+    if (scaff != nullptr && scaff->mangleNames_)
+        return std::string(enclosing) + "_" + name;
     return name;
 }
 
 using namespace llvm;
 using namespace llvm::orc;
 
+static_assert(sizeof(Datum::DatumType) == 4);
+static_assert(sizeof(int) == 4);
+static_assert(sizeof(bool) == 1);
+
 namespace
 {
-std::unique_ptr<LLJIT> createLLJIT()
+[[noreturn]] void throwFatalJitError(Error err, const char *what)
+{
+    std::string detail = toString(std::move(err));
+    std::cerr << "JIT error (" << what << "): " << detail << '\n';
+    throw FCError::fatalInternal();
+}
+
+void checkJitError(Error err, const char *what)
+{
+    if (err)
+        throwFatalJitError(std::move(err), what);
+}
+
+template <typename T>
+T unwrapOrThrow(Expected<T> value, const char *what)
+{
+    if (!value)
+        throwFatalJitError(value.takeError(), what);
+    return std::move(*value);
+}
+
+template <typename Ret, typename... Args>
+FunctionType *hostExportType(Ret (*)(Args...), LLVMContext &ctx)
+{
+    return FunctionType::get(CTypeToLLVM<Ret>::get(ctx), {CTypeToLLVM<Args>::get(ctx)...}, false);
+}
+
+struct HostExport
+{
+    const char *name;
+    FunctionType *(*getType)(LLVMContext &);
+};
+
+const HostExport hostExports[] = {
+#define JIT_EXPORT(ret, name, params) {#name, [](LLVMContext &c) { return hostExportType(name, c); }},
+#include "workspace/exports.inc"
+#undef JIT_EXPORT
+};
+
+Error defineHostExports(LLJIT &jit)
+{
+    MangleAndInterner mangle(jit.getExecutionSession(), jit.getDataLayout());
+    SymbolMap symbols;
+#define JIT_EXPORT(ret, name, params) \
+    symbols[mangle(#name)] = ExecutorSymbolDef::fromPtr(name, JITSymbolFlags::Exported);
+#include "workspace/exports.inc"
+#undef JIT_EXPORT
+    return jit.getMainJITDylib().define(absoluteSymbols(std::move(symbols)));
+}
+
+std::unique_ptr<LLJIT> createLLJIT(JITTargetMachineBuilder jtmb)
 {
     auto jitOrErr = llvm::orc::LLJITBuilder()
+                        .setJITTargetMachineBuilder(std::move(jtmb))
                         .setNotifyCreatedCallback([](llvm::orc::LLJIT &J) -> llvm::Error {
                             if (!J.getTargetTriple().isOSBinFormatCOFF())
                                 return llvm::Error::success();
-                            auto *rtdyld =
-                                llvm::dyn_cast<llvm::orc::RTDyldObjectLinkingLayer>(&J.getObjLinkingLayer());
+                            auto *rtdyld = llvm::dyn_cast<llvm::orc::RTDyldObjectLinkingLayer>(&J.getObjLinkingLayer());
                             if (rtdyld)
                             {
                                 rtdyld->setOverrideObjectFlagsWithResponsibilityFlags(true);
@@ -68,7 +157,11 @@ std::unique_ptr<LLJIT> createLLJIT()
                             return llvm::Error::success();
                         })
                         .create();
-    return cantFail(std::move(jitOrErr));
+    auto jit = unwrapOrThrow(std::move(jitOrErr), "LLJITBuilder::create");
+    if (Error err = enableDebuggerSupport(*jit))
+        consumeError(std::move(err));
+    checkJitError(defineHostExports(*jit), "defineHostExports");
+    return jit;
 }
 
 /// Creates a resource tracker, adds the module to the JIT, and looks up the symbol.
@@ -76,76 +169,371 @@ std::unique_ptr<LLJIT> createLLJIT()
 std::pair<uint64_t, ResourceTrackerSP> addModuleAndLookup(LLJIT &jit, ThreadSafeModule tsm, StringRef name)
 {
     auto rt = jit.getMainJITDylib().createResourceTracker();
-    cantFail(jit.addIRModule(rt, std::move(tsm)));
-    uint64_t addr = cantFail(jit.lookup(name)).getValue();
-    return {addr, std::move(rt)};
+    checkJitError(jit.addIRModule(rt, std::move(tsm)), "addIRModule");
+    auto symOrErr = jit.lookup(name);
+    if (!symOrErr)
+    {
+        consumeError(rt->remove());
+        throwFatalJitError(symOrErr.takeError(), "lookup");
+    }
+    return {symOrErr->getValue(), std::move(rt)};
 }
 
-void addDefaultPasses(FunctionPassManager &fpm)
-{
-    fpm.addPass(InstCombinePass());
-    fpm.addPass(ReassociatePass());
-    fpm.addPass(GVNPass());
-    fpm.addPass(SimplifyCFGPass());
-}
-
-void setupPassManager(PassInstrumentationCallbacks &pic, ModuleAnalysisManager &mam,
-                      FunctionAnalysisManager &fam, LoopAnalysisManager &lam,
-                      CGSCCAnalysisManager &cgam, StandardInstrumentations &si)
+void registerPassAnalyses(PassBuilder &pb,
+                          PassInstrumentationCallbacks &pic,
+                          ModuleAnalysisManager &mam,
+                          FunctionAnalysisManager &fam,
+                          LoopAnalysisManager &lam,
+                          CGSCCAnalysisManager &cgam,
+                          StandardInstrumentations &si)
 {
     si.registerCallbacks(pic, &mam);
-    PassBuilder pb;
     pb.registerModuleAnalyses(mam);
     pb.registerCGSCCAnalyses(cgam);
     pb.registerFunctionAnalyses(fam);
+    pb.registerLoopAnalyses(lam);
     pb.crossRegisterProxies(lam, fam, cgam, mam);
 }
 
-/// Run the coroutine lowering pipeline so that llvm.coro.* intrinsics are
-/// lowered before the module is sent to the backend.
-void runCoroutinePasses(Module &M, ModuleAnalysisManager &mam,
-                        FunctionAnalysisManager &fam, LoopAnalysisManager &lam,
-                        CGSCCAnalysisManager &cgam)
+/// O2 matches TargetMachine's default codegen level. Coro clones are called
+/// through function pointers, so the inliner will not merge them into the ramp.
+/// Host EXPORTC decls have no bodies to inline.
+void runOptimizationPipeline(Module &M, PassBuilder &pb, ModuleAnalysisManager &mam)
 {
-    PassBuilder pb;
-    pb.registerModuleAnalyses(mam);
-    pb.registerCGSCCAnalyses(cgam);
-    pb.registerFunctionAnalyses(fam);
-    pb.crossRegisterProxies(lam, fam, cgam, mam);
-    ModulePassManager coroMPM;
-    cantFail(pb.parsePassPipeline(coroMPM, "coro-early,cgscc(coro-split),function(coro-elide),coro-cleanup"));
-    coroMPM.run(M, mam);
+    ModulePassManager mpm = pb.buildPerModuleDefaultPipeline(OptimizationLevel::O2);
+    mpm.run(M, mam);
 }
 
-/// coro-split emit resume/destroy/cleanup as fastcc;
-/// However, they are invoked through C function pointers 
-/// (LLVMCoroFrameHeader). Match that ABI here.
-void setCoroHelperCallingConv(Module &M)
+template <typename T, typename Value>
+StringSwitch<T> &stringSwitchCases(StringSwitch<T> &sw,
+                                   std::initializer_list<StringLiteral> names,
+                                   Value &&value)
 {
+    for (StringLiteral name : names)
+        sw.Case(name, value);
+    return sw;
+}
+
+/// Conservative memory effects for host exports. Unlisted names stay unknown.
+/// Do not mark I/O, RNG, or allocating constructors; wrong effects miscompile.
+std::optional<MemoryEffects> memoryEffectsForHostExport(StringRef name)
+{
+    using ME = MemoryEffects;
+    StringSwitch<std::optional<ME>> sw(name);
+    sw.Case("repcountAddr", ME::none());
+    stringSwitchCases(sw,
+                      {"getCountOfList",
+                       "isEmpty",
+                       "isNumber",
+                       "isSingleCharWord",
+                       "isVbarred",
+                       "isValidOpenSpec",
+                       "isValidShellCommand",
+                       "getTemplateForm"},
+                      ME::argMemOnly(ModRefInfo::Ref));
+    stringSwitchCases(sw,
+                      {"parseDoubleForDatum", "parseBoolForDatum", "getNumberAryFromList", "isDatumIndexValid"},
+                      ME::argMemOnly(ModRefInfo::ModRef));
+    stringSwitchCases(sw,
+                      {"cmpDatumToDatum",     "isBefore",         "isMember",       "isSubstring",
+                       "isDatumEmpty",        "getTestResult",    "isValidColor",   "isValidPenSize",
+                       "isValidPenPattern",   "isColorIndexGood", "isContentsList", "isNamedContentsList",
+                       "isDefinableProcName", "isDefineText",     "stdProcedurep",  "stdMacrop",
+                       "stdPrimitivep",       "stdDefinedp",      "stdNamep",       "stdPlistp",
+                       "stdBuriedp",          "stdTracedp",       "stdSteppedp",    "isTurtleVisible",
+                       "isPenDown",           "getTurtleHeading"},
+                      ME::readOnly());
+    return sw.Default(std::nullopt);
+}
+
+/// Clones are invoked through C function pointers (LLVMCoroFrameHeader).
+/// EXPORTC is noexcept, so clones do not unwind.
+void applyCAbiToCoroClone(Function &F)
+{
+    F.setCallingConv(CallingConv::C);
+    F.setUWTableKind(UWTableKind::Default);
+    F.setDoesNotThrow();
+    F.addFnAttr("frame-pointer", "all");
+
+    if (F.arg_size() >= 1 && F.getArg(0)->getType()->isPointerTy())
+    {
+        Argument *frame = F.getArg(0);
+        frame->addAttr(Attribute::NonNull);
+        frame->addAttr(Attribute::NoUndef);
+    }
+
+    for (User *U : F.users())
+    {
+        auto *CB = dyn_cast<CallBase>(U);
+        if (CB && CB->getCalledFunction() == &F)
+            CB->setCallingConv(CallingConv::C);
+    }
+}
+
+/// coro-split emits switch clones as fastcc. Patch the official Clones list.
+struct CCallingConvSwitchABI : coro::SwitchABI
+{
+    using SwitchABI::SwitchABI;
+
+    void splitCoroutine(Function &F,
+                        coro::Shape &Shape,
+                        SmallVectorImpl<Function *> &Clones,
+                        TargetTransformInfo &TTI) override
+    {
+        SwitchABI::splitCoroutine(F, Shape, Clones, TTI);
+        for (Function *Clone : Clones)
+            applyCAbiToCoroClone(*Clone);
+    }
+};
+
+/// SROA / InstCombine before split so allocas that do not escape can die
+/// before the frame is built.
+void runPreCoroPasses(Module &M, FunctionAnalysisManager &fam)
+{
+    FunctionPassManager fpm;
+    fpm.addPass(SROAPass(SROAOptions::ModifyCFG));
+    fpm.addPass(InstCombinePass());
     for (Function &F : M)
     {
         if (F.isDeclaration())
             continue;
-        StringRef name = F.getName();
-        if (name.ends_with(".resume") || name.ends_with(".destroy") || name.ends_with(".cleanup"))
-            F.setCallingConv(CallingConv::C);
+        fpm.run(F, fam);
     }
+}
+
+/// Run the coroutine lowering pipeline so that llvm.coro.* intrinsics are
+/// lowered before the module is sent to the backend.
+void runCoroutinePasses(Module &M, ModuleAnalysisManager &mam)
+{
+    CoroSplitPass splitPass(/*OptimizeFrame=*/true);
+    splitPass.CreateAndInitABI = [](Function &F, coro::Shape &S) {
+        auto ABI = std::make_unique<CCallingConvSwitchABI>(F, S, coro::isTriviallyMaterializable);
+        ABI->init();
+        return ABI;
+    };
+
+    CGSCCPassManager cgscc;
+    cgscc.addPass(std::move(splitPass));
+
+    FunctionPassManager elideFPM;
+    elideFPM.addPass(CoroElidePass());
+
+    ModulePassManager coroMPM;
+    coroMPM.addPass(CoroEarlyPass());
+    coroMPM.addPass(createModuleToPostOrderCGSCCPassAdaptor(std::move(cgscc)));
+    coroMPM.addPass(createModuleToFunctionPassAdaptor(std::move(elideFPM)));
+    coroMPM.addPass(CoroCleanupPass());
+    coroMPM.run(M, mam);
+}
+
+/// Print LLVM dump text to the current Logo write stream (PRINT / SHOW).
+void emitDumpText(const std::string &text)
+{
+    if (text.empty())
+        return;
+    QString output = QString::fromStdString(text);
+    if (!output.endsWith(QLatin1Char('\n')))
+        output.append(QLatin1Char('\n'));
+    StreamManager::get().print(output);
+}
+
+void verifyIROrThrow(bool broken, const std::string &str)
+{
+    if (!broken)
+        return;
+    std::cerr << "IR verification failed:\n" << str << "\n";
+    throw FCError::fatalInternal();
+}
+
+void verifyFunctionOrThrow(Function &F)
+{
+    std::string str;
+    raw_string_ostream output(str);
+    verifyIROrThrow(verifyFunction(F, &output), str);
+}
+
+void verifyModuleOrThrow(Module &M)
+{
+    std::string str;
+    raw_string_ostream output(str);
+    verifyIROrThrow(verifyModule(M, &output), str);
+}
+
+void emitModuleIR(Module &M)
+{
+    std::string str;
+    raw_string_ostream os(str);
+    M.print(os, nullptr);
+    os.flush();
+    emitDumpText(str);
+}
+
+bool skipAllocaLifetime(AllocaInst *ai)
+{
+    auto *arr = dyn_cast<ArrayType>(ai->getAllocatedType());
+    return arr && arr->getNumElements() == 0;
 }
 } // namespace
 
-Scaffold::Scaffold(const llvm::DataLayout &dataLayout)
+void applyHostExportAttrs(Function *F,
+                          CallInst *CI,
+                          const AttributeList &abiAttrs,
+                          StringRef name,
+                          Value *evaluator,
+                          const std::vector<Value *> &args)
+{
+    LLVMContext &ctx = CI->getContext();
+    AttributeList al = abiAttrs;
+    AttrBuilder fn(ctx);
+    fn.addUWTableAttr(UWTableKind::Default);
+    fn.addAttribute(Attribute::NoUnwind);
+    if (CI->getModule()->getTargetTriple().isOSBinFormatELF())
+        fn.addAttribute(Attribute::NonLazyBind);
+    if (std::optional<MemoryEffects> me = memoryEffectsForHostExport(name))
+        fn.addMemoryAttr(*me);
+    al = al.addFnAttributes(ctx, fn);
+
+    for (size_t i = 0; i < args.size(); ++i)
+    {
+        if (args[i] != evaluator)
+            continue;
+        AttrBuilder pb(ctx);
+        pb.addAttribute(Attribute::NonNull);
+        pb.addDereferenceableAttr(sizeof(Evaluator));
+        pb.addAlignmentAttr(Align(alignof(Evaluator)));
+        al = al.addParamAttributes(ctx, static_cast<unsigned>(i), pb);
+        break;
+    }
+
+    if (F)
+    {
+        F->setAttributes(al);
+        F->setDSOLocal(true);
+    }
+    CI->setAttributes(al);
+}
+
+FunctionType *hostExportFunctionType(LLVMContext &ctx, StringRef name)
+{
+    for (const auto &exp : hostExports)
+    {
+        if (name == exp.name)
+            return exp.getType(ctx);
+    }
+    std::cerr << "JIT error (host export): unknown function '" << name.str() << "'\n";
+    throw FCError::fatalInternal();
+}
+
+// QByteArray::toStdString() allocates the std::string inside Qt6Core. This
+// executable then frees it so that it doesn't crash in operator delete when
+// the text is long enough to be on the heap.
+static std::string utf8StdString(const QByteArray &utf8)
+{
+    if (utf8.isEmpty())
+        return {};
+    return std::string(utf8.constData(), static_cast<size_t>(utf8.size()));
+}
+
+static std::string sanitizeIrStem(const std::string &utf8)
+{
+    std::string out;
+    out.reserve(utf8.size());
+    for (unsigned char c : utf8)
+    {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.')
+            out.push_back(static_cast<char>(c));
+        else
+            out.push_back('_');
+    }
+    if (out.empty() || !((out.front() >= 'A' && out.front() <= 'Z') || (out.front() >= 'a' && out.front() <= 'z') ||
+                         out.front() == '_'))
+        out.insert(out.begin(), '_');
+    return out;
+}
+
+Scaffold::Scaffold(const llvm::DataLayout &dataLayout,
+                   TargetMachine *tm,
+                   std::string displayName,
+                   std::string debugSource)
     : theContext_(std::make_unique<LLVMContext>()), theModule_(std::make_unique<Module>("QLogoJIT", *theContext_)),
-      builder_(IRBuilder<>(*theContext_)), theFPM_(FunctionPassManager()), theLAM_(LoopAnalysisManager()),
-      theFAM_(FunctionAnalysisManager()), theCGAM_(CGSCCAnalysisManager()), theMAM_(ModuleAnalysisManager()),
-      thePIC_(PassInstrumentationCallbacks()), theSI_(StandardInstrumentations(*theContext_,
-                                                                               /*DebugLogging*/ true))
+      builder_(IRBuilder<>(*theContext_)), theLAM_(LoopAnalysisManager()), theFAM_(FunctionAnalysisManager()),
+      theCGAM_(CGSCCAnalysisManager()), theMAM_(ModuleAnalysisManager()), thePIC_(PassInstrumentationCallbacks()),
+      theSI_(StandardInstrumentations(*theContext_, /*DebugLogging=*/false)),
+      thePB_(tm, PipelineTuningOptions(), std::nullopt, &thePIC_)
 {
     theModule_->setDataLayout(dataLayout);
-    addDefaultPasses(theFPM_);
-    setupPassManager(thePIC_, theMAM_, theFAM_, theLAM_, theCGAM_, theSI_);
+    if (tm)
+        theModule_->setTargetTriple(tm->getTargetTriple());
 
+    // Itanium layout of Datum: vptr, isa_ (u32), retainCount_ (int), alertOnDelete_ (bool).
+    datumHeaderTy_ = StructType::create(*theContext_,
+                                        {PointerType::get(*theContext_, 0),
+                                         Type::getInt32Ty(*theContext_),
+                                         Type::getInt32Ty(*theContext_),
+                                         Type::getInt8Ty(*theContext_)},
+                                        "DatumHeader");
+    {
+        const StructLayout *sl = theModule_->getDataLayout().getStructLayout(datumHeaderTy_);
+        const Datum *probe = Datum::notADatum();
+        const char *base = reinterpret_cast<const char *>(probe);
+        Q_ASSERT(sl->getElementOffset(1) == static_cast<uint64_t>(reinterpret_cast<const char *>(&probe->isa_) - base));
+        Q_ASSERT(sl->getElementOffset(2) ==
+                 static_cast<uint64_t>(reinterpret_cast<const char *>(&probe->retainCount_) - base));
+        Q_ASSERT(sl->getElementOffset(3) ==
+                 static_cast<uint64_t>(reinterpret_cast<const char *>(&probe->alertOnDelete_) - base));
+    }
+    MDBuilder tbaaMdb(*theContext_);
+    MDNode *tbaaRoot = tbaaMdb.createTBAARoot("qlogo");
+    MDNode *isaTbaaTy = tbaaMdb.createTBAATypeNode(tbaaRoot, 4, MDString::get(*theContext_, "datum.isa"));
+    isaLoadTbaa_ = tbaaMdb.createTBAAAccessTag(isaTbaaTy, isaTbaaTy, 0, 4, /*IsImmutable=*/false);
+    {
+        // Sorted isa_ values. Adjacent [v, v+1) pairs must be merged.
+        static constexpr uint32_t isaVals[] = {
+            Datum::typeWord,
+            Datum::typeList,
+            Datum::typeArray,
+            Datum::typeError,
+            Datum::typeGoto,
+            Datum::typeContinuation,
+            Datum::typeReturn,
+            Datum::typeNothing,
+            Datum::typeASTNode,
+            Datum::typeProcedure,
+            Datum::typePersistentWord,
+            Datum::typeEmptyList,
+            Datum::typeNothingPersistent,
+        };
+        IntegerType *i32 = Type::getInt32Ty(*theContext_);
+        SmallVector<Metadata *, 24> rangeOps;
+        auto addInterval = [&](uint32_t lo, uint32_t hi) {
+            rangeOps.push_back(ConstantAsMetadata::get(ConstantInt::get(i32, lo)));
+            rangeOps.push_back(ConstantAsMetadata::get(ConstantInt::get(i32, hi)));
+        };
+        uint32_t lo = isaVals[0];
+        uint32_t hi = isaVals[0] + 1;
+        for (uint32_t v : isaVals)
+        {
+            if (v == lo)
+                continue;
+            if (v == hi)
+                hi = v + 1;
+            else
+            {
+                addInterval(lo, hi);
+                lo = v;
+                hi = v + 1;
+            }
+        }
+        addInterval(lo, hi);
+        isaLoadRange_ = MDNode::get(*theContext_, rangeOps);
+    }
+
+    registerPassAnalyses(thePB_, thePIC_, theMAM_, theFAM_, theLAM_, theCGAM_, theSI_);
+
+    if (displayName.empty())
+        displayName = "list";
     static uint64_t functionCount = 1;
-    name_ = "function_" + std::to_string(functionCount++);
+    name_ = "logo_" + sanitizeIrStem(displayName) + "_" + std::to_string(functionCount++);
 
     auto addr_type = PointerType::get(*theContext_, 0);
     auto int32_type = Type::getInt32Ty(*theContext_);
@@ -161,31 +549,203 @@ Scaffold::Scaffold(const llvm::DataLayout &dataLayout)
     FunctionType *ft = FunctionType::get(addr_type, paramAry, false);
     theFunction_ = Function::Create(ft, Function::ExternalLinkage, name_, *theModule_);
     theFunction_->setPresplitCoroutine();
+    // nounwind matches the EXPORTC noexcept ABI; uwtable remains for unwinders/debuggers.
+    theFunction_->setUWTableKind(UWTableKind::Default);
+    theFunction_->setDoesNotThrow();
+    theFunction_->addFnAttr("frame-pointer", "all");
+
+    const DataLayout &dl = theModule_->getDataLayout();
 
     // The first argument is the evaluator pointer.
     evaluator_ = theFunction_->getArg(0);
     evaluator_->setName("evaluator");
+    {
+        AttrBuilder b(*theContext_);
+        b.addAttribute(Attribute::NonNull);
+        b.addAttribute(Attribute::NoAlias);
+        b.addAttribute(Attribute::NoUndef);
+        b.addDereferenceableAttr(sizeof(Evaluator));
+        b.addAlignmentAttr(Align(alignof(Evaluator)));
+        theFunction_->getArg(0)->addAttrs(b);
+    }
 
     // The second argument is the address of the return value.
     returnValueAddress_ = theFunction_->getArg(1);
     returnValueAddress_->setName("returnValueAddress");
+    {
+        AttrBuilder b(*theContext_);
+        b.addAttribute(Attribute::NonNull);
+        b.addAttribute(Attribute::NoAlias);
+        b.addAttribute(Attribute::NoUndef);
+        b.addAttribute(Attribute::WriteOnly);
+        b.addDereferenceableAttr(dl.getPointerSize(0));
+        b.addAlignmentAttr(dl.getPointerABIAlignment(0));
+        theFunction_->getArg(1)->addAttrs(b);
+    }
 
     // The third argument is the block ID for the block to begin execution at.
     // Needed when we build the Table of Contents for this function.
     blockId_ = theFunction_->getArg(2);
     blockId_->setName("blockId");
+    theFunction_->getArg(2)->addAttr(Attribute::NoUndef);
 
     // The fourth argument is the resume handle (null = start, non-null = resume).
     resumeHandle_ = theFunction_->getArg(3);
     resumeHandle_->setName("resumeHandle");
+    theFunction_->getArg(3)->addAttr(Attribute::NoUndef);
 
+    std::string fileName = sanitizeIrStem(displayName) + ".lg";
+    theModule_->setSourceFileName(fileName);
+    theModule_->addModuleFlag(Module::Warning, "Debug Info Version", DEBUG_METADATA_VERSION);
+    theModule_->addModuleFlag(Module::Warning, "Dwarf Version", 4);
+
+    dbg_ = std::make_unique<DIBuilder>(*theModule_);
+    std::optional<StringRef> source;
+    if (!debugSource.empty())
+        source = debugSource;
+    file_ = dbg_->createFile(fileName, "<qlogo>", std::nullopt, source);
+    dbg_->createCompileUnit(dwarf::DW_LANG_C, file_, "QLogo", true, "", 0);
+    DISubroutineType *fnTyDI = dbg_->createSubroutineType(dbg_->getOrCreateTypeArray({}));
+    sp_ = dbg_->createFunction(file_,
+                               displayName,
+                               name_,
+                               file_,
+                               1,
+                               fnTyDI,
+                               1,
+                               DINode::FlagPrototyped,
+                               DISubprogram::SPFlagDefinition | DISubprogram::SPFlagOptimized);
+    theFunction_->setSubprogram(sp_);
+}
+
+Scaffold::~Scaffold() = default;
+
+void Scaffold::setDebugLoc(unsigned line, unsigned column)
+{
+    if (!sp_)
+        return;
+    dbgLine_ = line;
+    dbgColumn_ = column;
+    builder_.SetCurrentDebugLocation(DILocation::get(*theContext_, line, column, sp_));
+}
+
+void Scaffold::emitTagLabel(StringRef name)
+{
+    if (!dbg_ || !sp_ || name.empty())
+        return;
+    DILabel *lab = dbg_->createLabel(sp_, name, file_, dbgLine_, dbgColumn_, false, std::nullopt, true);
+    dbg_->insertLabel(lab, builder_.getCurrentDebugLocation(), builder_.GetInsertPoint());
+}
+
+void Scaffold::finalizeDebugInfo()
+{
+    if (dbg_)
+        dbg_->finalize();
 }
 
 BasicBlock *Scaffold::createBasicBlock(const std::string &name)
 {
-    return BasicBlock::Create(*theContext_, name, theFunction_);
+    return BasicBlock::Create(*theContext_, name, theFunction_, mainBailoutBB_);
 }
 
+AllocaInst *Scaffold::createEntryBlockAlloca(Type *type, const std::string &name)
+{
+    BasicBlock &entry = theFunction_->getEntryBlock();
+    IRBuilder<> tmp(&entry, entry.begin());
+    tmp.SetCurrentDebugLocation(builder_.getCurrentDebugLocation());
+    return tmp.CreateAlloca(type, nullptr, name);
+}
+
+AllocaInst *Scaffold::createEntryBlockArrayAlloca(Type *elemTy, uint64_t count, const std::string &name)
+{
+    return createEntryBlockAlloca(ArrayType::get(elemTy, count), name);
+}
+
+void Scaffold::hoistAllocasToEntry()
+{
+    BasicBlock &entry = theFunction_->getEntryBlock();
+    std::vector<AllocaInst *> allocas;
+    for (BasicBlock &bb : *theFunction_)
+    {
+        for (Instruction &inst : bb)
+        {
+            if (auto *ai = dyn_cast<AllocaInst>(&inst))
+                allocas.push_back(ai);
+        }
+    }
+
+    Instruction *insertBefore = &*entry.getFirstInsertionPt();
+    while (insertBefore && isa<AllocaInst>(insertBefore))
+        insertBefore = insertBefore->getNextNode();
+    Q_ASSERT(insertBefore != nullptr);
+
+    for (AllocaInst *ai : allocas)
+    {
+        if (ai->getParent() == &entry)
+            continue;
+        ai->moveBefore(insertBefore->getIterator());
+    }
+}
+
+void Scaffold::finalizeColdPaths()
+{
+    SmallPtrSet<BasicBlock *, 16> cold;
+    for (BasicBlock *bb : coldPathBlocks_)
+        cold.insert(bb);
+
+    MDBuilder mdb(*theContext_);
+    SmallPtrSet<Instruction *, 16> seen;
+    constexpr uint32_t hotWeight = 1u << 20;
+    constexpr uint32_t coldWeight = 1u;
+
+    for (BasicBlock *coldBB : coldPathBlocks_)
+    {
+        for (BasicBlock *pred : predecessors(coldBB))
+        {
+            Instruction *term = pred->getTerminator();
+            if (!seen.insert(term).second)
+                continue;
+
+            if (auto *br = dyn_cast<BranchInst>(term))
+            {
+                if (!br->isConditional())
+                    continue;
+                const bool trueCold = cold.contains(br->getSuccessor(0));
+                const bool falseCold = cold.contains(br->getSuccessor(1));
+                if (trueCold == falseCold)
+                    continue;
+                br->setMetadata(LLVMContext::MD_prof,
+                                trueCold ? mdb.createUnlikelyBranchWeights() : mdb.createLikelyBranchWeights());
+            }
+            else if (auto *sw = dyn_cast<SwitchInst>(term))
+            {
+                SmallVector<uint32_t, 8> weights;
+                weights.reserve(sw->getNumSuccessors());
+                bool anyCold = false;
+                bool anyHot = false;
+                for (unsigned i = 0, n = sw->getNumSuccessors(); i < n; ++i)
+                {
+                    const bool isCold = cold.contains(sw->getSuccessor(i));
+                    anyCold |= isCold;
+                    anyHot |= !isCold;
+                    weights.push_back(isCold ? coldWeight : hotWeight);
+                }
+                if (anyCold && anyHot)
+                    sw->setMetadata(LLVMContext::MD_prof, mdb.createBranchWeights(weights, /*IsExpected=*/true));
+            }
+        }
+
+        for (Instruction &inst : *coldBB)
+        {
+            auto *cb = dyn_cast<CallBase>(&inst);
+            if (cb && cb->getIntrinsicID() == Intrinsic::not_intrinsic)
+                cb->addFnAttr(Attribute::Cold);
+        }
+    }
+
+    for (BasicBlock *block : coldPathBlocks_)
+        block->moveAfter(&theFunction_->back());
+}
 
 CompiledText::~CompiledText()
 {
@@ -193,7 +753,7 @@ CompiledText::~CompiledText()
     // (it may have been destroyed if CompiledText outlives the Compiler singleton)
     if (compiler_ != nullptr && rt_)
     {
-        cantFail(rt_->remove());
+        consumeError(rt_->remove());
     }
 }
 
@@ -202,7 +762,9 @@ Compiler::Compiler()
     InitializeNativeTarget();
     InitializeNativeTargetAsmPrinter();
     InitializeNativeTargetAsmParser();
-    lljit_ = createLLJIT();
+    auto jtmb = unwrapOrThrow(JITTargetMachineBuilder::detectHost(), "detectHost");
+    targetMachine_ = unwrapOrThrow(jtmb.createTargetMachine(), "createTargetMachine");
+    lljit_ = createLLJIT(std::move(jtmb));
 }
 
 Compiler::~Compiler()
@@ -211,22 +773,17 @@ Compiler::~Compiler()
     releaseAllCompiledText();
 }
 
+void Compiler::noteCodeChange()
+{
+    lastCodeChangeTimestamp_ = QDateTime::currentMSecsSinceEpoch();
+}
+
 void Compiler::trackCompiledText(const std::shared_ptr<CompiledText> &compiledText)
 {
-    // Drop expired weak refs occasionally so the vector does not grow without bound.
-    // TODO: What if the list stays too long?
-    if (liveCompiledTexts_.size() >= 64)
-    {
-        std::vector<std::weak_ptr<CompiledText>> live;
-        live.reserve(liveCompiledTexts_.size() + 1);
-        for (auto &w : liveCompiledTexts_)
-        {
-            if (!w.expired()) {
-                live.push_back(std::move(w));
-            }
-        }
-        liveCompiledTexts_ = std::move(live);
-    }
+    liveCompiledTexts_.erase(std::remove_if(liveCompiledTexts_.begin(),
+                                            liveCompiledTexts_.end(),
+                                            [](const std::weak_ptr<CompiledText> &w) { return w.expired(); }),
+                             liveCompiledTexts_.end());
     liveCompiledTexts_.push_back(compiledText);
 }
 
@@ -238,7 +795,7 @@ void Compiler::releaseAllCompiledText()
         {
             if (compiledText->rt_)
             {
-                cantFail(compiledText->rt_->remove());
+                consumeError(compiledText->rt_->remove());
                 compiledText->rt_.reset();
             }
             compiledText->functionPtr_ = nullptr;
@@ -269,7 +826,7 @@ void Compiler::setTagToBlockIdInProcedure(const QList<DatumPtr> &tagList, int32_
     CallFrame *currentFrame = Kernel::get().currentCallFrame();
 
     // If the current frame is not a procedure, there is no need to save the tag names.
-    if ( ! currentFrame->sourceNode_.isASTNode())
+    if (!currentFrame->sourceNode_.isASTNode())
     {
         return;
     }
@@ -293,6 +850,35 @@ void Compiler::setTagToBlockIdInProcedure(const QList<DatumPtr> &tagList, int32_
     }
 }
 
+QString Compiler::jitDisplayName(List *aList) const
+{
+    if (!tagLineLocation_.isNothing() && tagLineLocation_.isList() && !tagLineLocation_.listValue()->isEmpty() &&
+        tagLineLocation_.listValue()->head.datumValue() == aList)
+    {
+        CallFrame *cf = Kernel::get().currentCallFrame();
+        if (cf && cf->sourceNode_.isASTNode())
+        {
+            QString n = cf->sourceNode_.astnodeValue()->nodeName_.toString();
+            if (!n.isEmpty())
+                return n;
+        }
+    }
+    return QStringLiteral("list");
+}
+
+void Compiler::emitDebugForTagBlock(const QList<DatumPtr> &tagList, int32_t blockId)
+{
+    scaff_->setDebugLoc(static_cast<unsigned>(blockId) + 1, 1);
+    for (const auto &node : tagList)
+    {
+        QString tagName = getTagNameFromNode(node);
+        if (tagName.isEmpty())
+            continue;
+        const QByteArray utf8 = tagName.toUtf8();
+        scaff_->emitTagLabel(StringRef(utf8.constData(), static_cast<size_t>(utf8.size())));
+    }
+}
+
 BasicBlock *Compiler::generateTOC(QList<BasicBlock *> blocks, Function *theFunction)
 {
     Q_ASSERT(blocks.size() > 1);
@@ -300,12 +886,11 @@ BasicBlock *Compiler::generateTOC(QList<BasicBlock *> blocks, Function *theFunct
     BasicBlock *tocBlock = BasicBlock::Create(*scaff_->theContext_, "Toc", theFunction, blocks[0]);
     scaff_->builder_.SetInsertPoint(tocBlock);
 
-    llvm::SwitchInst *switchInst = scaff_->builder_.CreateSwitch(scaff_->blockId_, blocks[0], static_cast<unsigned>(blocks.size() - 1));
+    llvm::SwitchInst *switchInst =
+        scaff_->builder_.CreateSwitch(scaff_->blockId_, blocks[0], static_cast<unsigned>(blocks.size() - 1));
     for (unsigned i = 1; i < blocks.size(); ++i)
     {
-        switchInst->addCase(llvm::cast<llvm::ConstantInt>(
-                                ConstantInt::get(scaff_->blockId_->getType(), i)),
-                            blocks[i]);
+        switchInst->addCase(llvm::cast<llvm::ConstantInt>(ConstantInt::get(scaff_->blockId_->getType(), i)), blocks[i]);
     }
 
     // Coroutine prologue was inserted before the body entry; redirect it to Toc so execution
@@ -320,7 +905,22 @@ BasicBlock *Compiler::generateTOC(QList<BasicBlock *> blocks, Function *theFunct
 
 std::shared_ptr<CompiledText> Compiler::generateFunctionPtrFromASTList(QList<QList<DatumPtr>> parsedList, List *aList)
 {
-    Scaffold compilerScaffolding(lljit_->getDataLayout());
+    const DumpRequest dump = dumpRequest_;
+    const std::string display = utf8StdString(jitDisplayName(aList).toUtf8());
+    const std::string debugSource =
+        utf8StdString(aList->toString(Datum::ToStringFlags_Source, 4, 80).toUtf8());
+    Scaffold compilerScaffolding(lljit_->getDataLayout(), targetMachine_.get(), display, debugSource);
+    compilerScaffolding.mangleNames_ = dump.any();
+
+    struct RestoreScaff
+    {
+        Compiler &compiler;
+        Scaffold *saved;
+        ~RestoreScaff()
+        {
+            compiler.scaff_ = saved;
+        }
+    } restore{*this, scaff_};
     scaff_ = &compilerScaffolding;
 
     auto compiledText = std::make_shared<CompiledText>();
@@ -332,38 +932,42 @@ std::shared_ptr<CompiledText> Compiler::generateFunctionPtrFromASTList(QList<QLi
     // The first block is number zero.
     int localBlockId = 0;
 
+    QList<DatumPtr> leadingTags;
     // If the first block is a tag, save the tag names
-    if (isTag(parsedList.first().first()))
+    if (!parsedList.isEmpty() && !parsedList.first().isEmpty() && isTag(parsedList.first().first()))
     {
-        setTagToBlockIdInProcedure(parsedList.first(), localBlockId);
+        leadingTags = parsedList.first();
+        setTagToBlockIdInProcedure(leadingTags, localBlockId);
         // Remove the first tag block from the list.
         parsedList.removeFirst();
     }
 
-    // At this point we know that the first block and last block are not tags.
-
-    BasicBlock *currentBlock = BasicBlock::Create(*scaff_->theContext_, "FirstBlock", scaff_->theFunction_);
-
-    // TODO: move this to the end of the function.
-    scaff_->mainBailoutBB_ = BasicBlock::Create(*scaff_->theContext_, "MainBailout", scaff_->theFunction_);
+    BasicBlock *currentBlock = BasicBlock::Create(*scaff_->theContext_, "b0", scaff_->theFunction_);
+    // After b0 so it is last until body blocks insert before it.
+    scaff_->mainBailoutBB_ = scaff_->createBasicBlock("MainBailout");
 
     QList<BasicBlock *> blocks = {currentBlock};
     scaff_->builder_.SetInsertPoint(currentBlock);
+    scaff_->setDebugLoc(1, 1);
+    if (!leadingTags.isEmpty())
+        emitDebugForTagBlock(leadingTags, 0);
 
     Value *nodeResult = nullptr;
-    RequestReturnType returnTypeRequest = RequestReturnNothing;
+    TypeMask returnTypeRequest = TypeNothing;
     for (auto &srcBlock : parsedList)
     {
+        if (srcBlock.isEmpty())
+            continue;
         if (isTag(srcBlock.first()))
         {
             ++localBlockId;
-            BasicBlock *newBlock = BasicBlock::Create(*scaff_->theContext_, "Next Block", scaff_->theFunction_);
+            BasicBlock *newBlock = scaff_->createBasicBlock("b" + std::to_string(localBlockId));
             blocks.append(newBlock);
-            scaff_->builder_.SetInsertPoint(scaff_->builder_.GetInsertBlock());
             scaff_->builder_.CreateBr(newBlock);
             currentBlock = newBlock;
             scaff_->builder_.SetInsertPoint(newBlock);
             setTagToBlockIdInProcedure(srcBlock, localBlockId);
+            emitDebugForTagBlock(srcBlock, localBlockId);
         }
         else
         {
@@ -371,66 +975,64 @@ std::shared_ptr<CompiledText> Compiler::generateFunctionPtrFromASTList(QList<QLi
             {
                 // If this is the last node, accept any Datum return type.
                 // Otherwise, expect that nothing is returned.
-                if (node == parsedList.last().last())
-                    returnTypeRequest = RequestReturnDN;
+                if (!parsedList.last().isEmpty() && node == parsedList.last().last())
+                {
+                    returnTypeRequest = TypeDN;
+                    // Also, set the inSequenceTail_ flag so that the child will know it can generate a tail call.
+                    node.astnodeValue()->inSequenceTail_ = true;
+                }
                 nodeResult = generateChild(nullptr, node, returnTypeRequest);
             }
         }
     }
 
-    // Finish off the function
-    Q_ASSERT(nodeResult != nullptr);
+    // Empty list, or only TAGs after the leading tag block was stripped.
+    if (nodeResult == nullptr)
+        nodeResult = CoAddr(Datum::notADatum());
     generateReturn(nodeResult);
     generateWrapup();
-
-    // Move the cold path blocks to the end of the function.
-    for (auto *block : scaff_->coldPathBlocks_) {
-        block->moveAfter(&scaff_->theFunction_->back());
-    }
+    scaff_->finalizeColdPaths();
 
     if (blocks.size() > 1)
     {
         generateTOC(blocks, scaff_->theFunction_);
     }
 
-    if (Config::get().showIR_)
+    scaff_->hoistAllocasToEntry();
+    scaff_->finalizeDebugInfo();
+    runPreCoroPasses(*scaff_->theModule_, scaff_->theFAM_);
+
+    if (dump.showCFG)
     {
-        // Print the whole module so we see all functions after coroutine lowering (ramp, resume, destroy).
-        scaff_->theFunction_->print(errs());
-        fprintf(stderr, "\n");
+        std::string str;
+        llvm::raw_string_ostream os(str);
+        llvm::WriteGraph(os, scaff_->theFunction_, /*ShortNames=*/false, scaff_->name_);
+        os.flush();
+        emitDumpText(str);
     }
 
     if (Config::get().verifyIR_)
-    {
-        std::string str;
-        llvm::raw_string_ostream output(str);
-        // Validate the generated code, checking for consistency.
-        if (verifyFunction(*(scaff_->theFunction_), &output))
-        {
-            std::cerr << "IR verification failed:\n" << str << "\n";
-            throw FCError::fatalInternal();
-        }
-    }
-
-    if (Config::get().showCFG_)
-    {
-        scaff_->theFunction_->viewCFG();
-    }
+        verifyFunctionOrThrow(*scaff_->theFunction_);
 
     // Lower coroutine intrinsics before backend.
-    runCoroutinePasses(*scaff_->theModule_, scaff_->theMAM_, scaff_->theFAM_, scaff_->theLAM_, scaff_->theCGAM_);
-    setCoroHelperCallingConv(*scaff_->theModule_);
+    runCoroutinePasses(*scaff_->theModule_, scaff_->theMAM_);
 
-    // Run the optimizer on the function.
-    scaff_->theFPM_.run(*(scaff_->theFunction_), scaff_->theFAM_);
+    if (Config::get().verifyIR_)
+        verifyModuleOrThrow(*scaff_->theModule_);
 
-    if (Config::get().showModuleIR_)
-    {
-        // Print the whole module so we see all functions after coroutine lowering (ramp, resume, destroy).
-        scaff_->theModule_->print(errs(), nullptr);
-        fprintf(stderr, "\n");
-    }
+    if (dump.showIR)
+        emitModuleIR(*scaff_->theModule_);
 
+    // Optimize the ramp and every coro-split clone.
+    runOptimizationPipeline(*scaff_->theModule_, scaff_->thePB_, scaff_->theMAM_);
+
+    if (Config::get().verifyIR_)
+        verifyModuleOrThrow(*scaff_->theModule_);
+
+    if (dump.showModuleIR)
+        emitModuleIR(*scaff_->theModule_);
+
+    scaff_->builder_.SetCurrentDebugLocation(DebugLoc());
     auto tsm = ThreadSafeModule(std::move(scaff_->theModule_), std::move(scaff_->theContext_));
     auto [addr, rt] = addModuleAndLookup(*lljit_, std::move(tsm), scaff_->name_);
     compiledText->rt_ = std::move(rt);
@@ -460,15 +1062,15 @@ QList<QList<DatumPtr>> Compiler::groupConsecutiveExpressions(const QList<DatumPt
             }
         }
     }
-    // Append the final block of expressions
-    retval.append(currentBlock);
+    if (!currentBlock.isEmpty())
+        retval.append(currentBlock);
 
     // If the last block is a tag, append a NOOP expression to ensure that there is an instruction to jump to.
     if (!currentBlock.isEmpty() && isTag(currentBlock.last()))
     {
         auto *noopNode = new ASTNode(DatumPtr(StringConstants::keywordNoop()));
         noopNode->genExpression_ = &Compiler::genNoop;
-        noopNode->returnType_ = RequestReturnNothing;
+        noopNode->produces_ = TypeNothing;
 
         currentBlock = {DatumPtr(noopNode)};
         retval.append(currentBlock);
@@ -479,10 +1081,24 @@ QList<QList<DatumPtr>> Compiler::groupConsecutiveExpressions(const QList<DatumPt
 
 std::shared_ptr<CompiledText> Compiler::compiledTextFromList(List *aList)
 {
-    if (aList->compileTimeStamp <= Procedures::get().timeOfLastProcedureCreation() ||
-        !aList->compiledText_ || !aList->compiledText_->functionPtr_)
+    const bool dumpThisCompile = dumpRequest_.any();
+    if (dumpThisCompile)
+        aList->compiledText_.reset();
+
+    if (aList->compileTimeStamp <= lastCodeChangeTimestamp_ || !aList->compiledText_ ||
+        !aList->compiledText_->functionPtr_)
     {
-        QList<DatumPtr> astFlatList = Treeifier::astFromList(aList);
+        QList<DatumPtr> astFlatList;
+        if (dumpThisCompile)
+        {
+            // Library autoload during treeify must not inherit this dump request.
+            DumpScope nestedWithoutDump({});
+            astFlatList = Treeifier::astFromList(aList);
+        }
+        else
+        {
+            astFlatList = Treeifier::astFromList(aList);
+        }
         QList<QList<DatumPtr>> parsedList = groupConsecutiveExpressions(astFlatList);
         return generateFunctionPtrFromASTList(parsedList, aList);
     }
@@ -490,124 +1106,141 @@ std::shared_ptr<CompiledText> Compiler::compiledTextFromList(List *aList)
     return aList->compiledText_;
 }
 
-Value *Compiler::generateChildOfNode(ASTNode *parent, const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::generateChildOfNode(ASTNode *parent, const DatumPtr &node, TypeMask expected)
 {
+    if (scaff_->sp_)
+        scaff_->setDebugLoc(scaff_->dbgLine_, scaff_->dbgColumn_++);
     Generator method = node.astnodeValue()->genExpression_;
-    Value *retval = ((this->*method)(node, returnType));
+    Value *retval = ((this->*method)(node, expected));
     return retval;
 }
 
-Value *Compiler::generateCast(Value *src, ASTNode *parent, const DatumPtr &node, RequestReturnType destReturnType)
+Value *Compiler::generateCast(Value *src, ASTNode *parent, const DatumPtr &node, TypeMask expected)
 {
     Q_ASSERT(!src->getType()->isVoidTy());
-    RequestReturnType srcReturnType = node.astnodeValue()->returnType_;
+    TypeMask produces = node.astnodeValue()->produces_;
 
-    if (srcReturnType == destReturnType)
-        return src;
-
+    // produces_ is the native LLVM kind; expected is a mask of what the parent
+    // can consume. Keep the native kind when that bit is set. NFC every datum
+    // pointer the parent will treat as data (including TypeDB).
     if (src->getType()->isDoubleTy())
-        return generateCastFromDouble(src, parent, destReturnType);
+        return generateCastFromDouble(src, parent, expected);
     if (src->getType()->isIntegerTy(1))
-        return generateCastFromBool(src, parent, destReturnType);
-    if (srcReturnType == RequestReturnDatum)
-        return generateCastFromDatum(src, parent, destReturnType);
-    if (srcReturnType == RequestReturnNothing)
-        return generateCastFromNothing(src, parent, destReturnType);
+        return generateCastFromBool(src, parent, expected);
+    if (produces == TypeDatum)
+        return generateCastFromDatum(src, parent, expected);
+    if (produces == TypeNothing)
+        return generateCastFromNothing(src, parent, expected);
 
-    Q_ASSERT(srcReturnType == RequestReturnDN);
-    return generateCastFromDN(src, parent, destReturnType);
+    Q_ASSERT(produces == TypeDN);
+    return generateCastFromDN(src, parent, expected);
 }
 
-Value *Compiler::generateCastFromDouble(Value *src, ASTNode *parent, RequestReturnType destReturnType)
+Value *Compiler::generateCastFromDouble(Value *src, ASTNode *parent, TypeMask expected)
 {
-    if (destReturnType & RequestReturnReal)
+    if (expected & TypeReal)
         return src;
     Value *srcAsWord = generateWordFromDouble(src);
-    if (destReturnType & RequestReturnDatum)
-        return srcAsWord;
-    if (destReturnType & RequestReturnBool)
-        return generateImmediateReturn(generateErrorNoLike(parent, srcAsWord));
-    Q_ASSERT(destReturnType & RequestReturnNothing);
+    if (expected & TypeDatum)
+        return generateNotFlowControl(srcAsWord);
+    if (expected & TypeBool)
+        return generateBoolFromDatum(parent, srcAsWord);
     return generateImmediateReturn(generateErrorNoSay(srcAsWord));
 }
 
-Value *Compiler::generateCastFromBool(Value *src, ASTNode *parent, RequestReturnType destReturnType)
+Value *Compiler::generateCastFromBool(Value *src, ASTNode *parent, TypeMask expected)
 {
-    if (destReturnType & RequestReturnBool)
+    if (expected & TypeBool)
         return src;
     Value *srcAsWord = generateWordFromBool(src);
-    if (destReturnType & RequestReturnDatum)
-        return srcAsWord;
-    if (destReturnType & RequestReturnReal)
-        return generateImmediateReturn(generateErrorNoLike(parent, srcAsWord));
-    Q_ASSERT(destReturnType & RequestReturnNothing);
+    if (expected & TypeDatum)
+        return generateNotFlowControl(srcAsWord);
+    if (expected & TypeReal)
+        return generateDoubleFromDatum(parent, srcAsWord);
     return generateImmediateReturn(generateErrorNoSay(srcAsWord));
 }
 
-Value *Compiler::generateCastFromDatum(Value *src, ASTNode *parent, RequestReturnType destReturnType)
+Value *Compiler::generateCastFromDatum(Value *src, ASTNode *parent, TypeMask expected)
 {
-    if (destReturnType & RequestReturnDatum)
-        return src;
-    if (destReturnType & RequestReturnBool)
+    if (expected & TypeDatum)
+        return generateNotFlowControl(src);
+    if (expected & TypeBool)
         return generateBoolFromDatum(parent, src);
-    if (destReturnType & RequestReturnReal)
+    if (expected & TypeReal)
         return generateDoubleFromDatum(parent, src);
-    Q_ASSERT(destReturnType & RequestReturnNothing);
     return generateImmediateReturn(generateErrorNoSay(src));
 }
 
-Value *Compiler::generateCastFromNothing(Value *src, ASTNode *parent, RequestReturnType destReturnType)
+Value *Compiler::generateCastFromNothing(Value *src, ASTNode *parent, TypeMask expected)
 {
-    if (destReturnType & RequestReturnNothing)
-        return src;
-    return generateImmediateReturn(generateErrorNoOutput(src, parent));
+    if (expected & TypeNothing)
+        return src->getType()->isPointerTy() ? generateNotFlowControl(src) : src;
+
+    Value *recovered = generateRecoverDidntOutput(src, parent);
+    if (expected & TypeReal)
+        return generateDoubleFromDatum(parent, recovered);
+    if ((expected & TypeBool) && !(expected & TypeDatum))
+        return generateBoolFromDatum(parent, recovered);
+    return generateNotFlowControl(recovered);
 }
 
-Value *Compiler::generateCastFromDN(Value *src, ASTNode *parent, RequestReturnType destReturnType)
+Value *Compiler::generateCastFromDN(Value *src, ASTNode *parent, TypeMask expected)
 {
-    if (destReturnType == RequestReturnNothing)
+    if (expected == TypeNothing)
         return generateNothingFromDatum(parent, src);
-    if (destReturnType == RequestReturnDatum)
-        return generateNotNothingFromDatum(parent, src);
-    if (destReturnType == RequestReturnReal)
-        return generateDoubleFromDatum(parent, src);
-    Q_ASSERT(destReturnType == RequestReturnBool);
-    return generateBoolFromDatum(parent, src);
+
+    // Recover "did not output" only when Nothing is not allowed. Keep a datum
+    // pointer when the parent accepts Datum (IF's TypeDB, RUN / user procs).
+    if (!(expected & TypeNothing))
+        src = generateNotNothingFromDatum(parent, src);
+
+    if (expected & TypeDatum)
+        return generateNotFlowControl(src);
+    if (expected & TypeBool)
+        return generateBoolFromDatum(parent, src);
+    return generateDoubleFromDatum(parent, src);
 }
 
-Value *Compiler::generateChild(ASTNode *parent, const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::generateChild(ASTNode *parent, const DatumPtr &node, TypeMask expected)
 {
-    Value *child = generateChildOfNode(parent, node, returnType);
-    return generateCast(child, parent, node, returnType);
+    Value *child = generateChildOfNode(parent, node, expected);
+    return generateCast(child, parent, node, expected);
 }
 
-Value *Compiler::generateChild(ASTNode *parent, unsigned int index, RequestReturnType returnType)
+Value *Compiler::generateChild(ASTNode *parent, unsigned int index, TypeMask expected)
 {
     DatumPtr node = parent->childAtIndex(index);
-    return generateChild(parent, node, returnType);
+    return generateChild(parent, node, expected);
 }
 
 Value *Compiler::generateDoubleFromDatum(ASTNode *parent, Value *src)
 {
+    AllocaInst *out = scaff_->createEntryBlockAlloca(TyDouble, DBG_NAME("doubleOut"));
+    beginAllocaLifetime(out);
     Value *retval = nullptr;
-    auto realTest = [this, &retval](Value *src) {
-        retval = generateCallExtern(getDoubleForDatum, PaAddr(scaff_->evaluator_), PaAddr(src));
-        Value *dType = generateCallExtern(getValidityOfDoubleForDatum, PaAddr(scaff_->evaluator_), PaAddr(src));
-        return scaff_->builder_.CreateICmpEQ(dType, CoBool(true), DBG_NAME("isValidTest"));
+    auto realTest = [this, &retval, out](Value *src) {
+        Value *ok = generateCallExtern(parseDoubleForDatum, PaAddr(scaff_->evaluator_), PaAddr(src), PaAddr(out));
+        retval = scaff_->builder_.CreateLoad(TyDouble, out, DBG_NAME("doubleVal"));
+        return ok;
     };
     generateValidationDatum(parent, src, realTest);
+    endAllocaLifetime(out);
     return retval;
 }
 
 Value *Compiler::generateBoolFromDatum(ASTNode *parent, Value *src)
 {
+    AllocaInst *out = scaff_->createEntryBlockAlloca(TyInt8, DBG_NAME("boolOut"));
+    beginAllocaLifetime(out);
     Value *retval = nullptr;
-    auto boolTest = [this, &retval](Value *src) {
-        retval = generateCallExtern(getBoolForDatum, PaAddr(scaff_->evaluator_), PaAddr(src));
-        Value *dType = generateCallExtern(getValidityOfBoolForDatum, PaAddr(scaff_->evaluator_), PaAddr(src));
-        return scaff_->builder_.CreateICmpEQ(dType, CoBool(true), DBG_NAME("isValidTest"));
+    auto boolTest = [this, &retval, out](Value *src) {
+        Value *ok = generateCallExtern(parseBoolForDatum, PaAddr(scaff_->evaluator_), PaAddr(src), PaAddr(out));
+        retval = scaff_->builder_.CreateTrunc(
+            scaff_->builder_.CreateLoad(TyInt8, out, DBG_NAME("boolI8")), TyBool, DBG_NAME("boolVal"));
+        return ok;
     };
     generateValidationDatum(parent, src, boolTest);
+    endAllocaLifetime(out);
     return retval;
 }
 
@@ -624,51 +1257,120 @@ Value *Compiler::generateFromDatum(Datum::DatumType t, ASTNode *parent, Value *s
 
 Value *Compiler::generateNotNothingFromDatum(ASTNode *parent, Value *src)
 {
+    src = generateNotFlowControl(src);
+
+    BasicBlock *srcBB = scaff_->builder_.GetInsertBlock();
     BasicBlock *isNothingBB = scaff_->createBasicBlock(DBG_NAME("isNothing"));
     BasicBlock *notNothingBB = scaff_->createBasicBlock(DBG_NAME("notNothing"));
 
     scaff_->addColdPathBlocks(isNothingBB);
 
-    // isNothing?
     Value *dType = generateGetDatumIsa(src);
-    Value *mask = scaff_->builder_.CreateAnd(dType, CoInt32(Datum::typeDataMask), DBG_NAME("dataTypeMask"));
-    Value *cond = scaff_->builder_.CreateICmpEQ(mask, CoInt32(0), DBG_NAME("dataTypeMaskTest"));
-    scaff_->builder_.CreateCondBr(cond, isNothingBB, notNothingBB);
+    Value *dataMask = scaff_->builder_.CreateAnd(dType, CoInt32(Datum::typeDataMask), DBG_NAME("dataTypeMask"));
+    Value *isData = scaff_->builder_.CreateICmpNE(dataMask, CoInt32(0), DBG_NAME("isDataTest"));
+    scaff_->builder_.CreateCondBr(isData, notNothingBB, isNothingBB);
 
-    // Bad
     scaff_->builder_.SetInsertPoint(isNothingBB);
-    Value *errWhat = src;
-    Value *errObj = generateErrorNoOutput(errWhat, parent);
-    generateReturn(errObj);
+    Value *recovered = generateRecoverDidntOutput(src, parent);
+    BasicBlock *recoveredBB = scaff_->builder_.GetInsertBlock();
+    scaff_->builder_.CreateBr(notNothingBB);
 
-    // Good
     scaff_->builder_.SetInsertPoint(notNothingBB);
+    PHINode *retval = scaff_->builder_.CreatePHI(TyAddr, 2, DBG_NAME("notNothing"));
+    retval->addIncoming(src, srcBB);
+    retval->addIncoming(recovered, recoveredBB);
+    return retval;
+}
 
+Value *Compiler::generateNotFlowControl(Value *src)
+{
+    BasicBlock *isFlowBB = scaff_->createBasicBlock(DBG_NAME("isFlow"));
+    BasicBlock *notFlowBB = scaff_->createBasicBlock(DBG_NAME("notFlow"));
+
+    scaff_->addColdPathBlocks(isFlowBB);
+
+    Value *dType = generateGetDatumIsa(src);
+    Value *flowMask =
+        scaff_->builder_.CreateAnd(dType, CoInt32(Datum::typeFlowControlMask), DBG_NAME("flowControlMask"));
+    Value *isFlow = scaff_->builder_.CreateICmpNE(flowMask, CoInt32(0), DBG_NAME("isFlowTest"));
+    scaff_->builder_.CreateCondBr(isFlow, isFlowBB, notFlowBB);
+
+    scaff_->builder_.SetInsertPoint(isFlowBB);
+    generateReturn(src);
+
+    scaff_->builder_.SetInsertPoint(notFlowBB);
     return src;
 }
 
 Value *Compiler::generateNothingFromDatum(ASTNode *parent, Value *src)
 {
+    src = generateNotFlowControl(src);
+
     BasicBlock *notNothingBB = scaff_->createBasicBlock(DBG_NAME("notNothing"));
     BasicBlock *isNothingBB = scaff_->createBasicBlock(DBG_NAME("isNothing"));
 
     scaff_->addColdPathBlocks(notNothingBB);
 
-    // isNothing?
     Value *dType = generateGetDatumIsa(src);
-    Value *mask = scaff_->builder_.CreateAnd(dType, CoInt32(Datum::typeDataMask), DBG_NAME("dataTypeMask"));
-    Value *cond = scaff_->builder_.CreateICmpEQ(mask, CoInt32(0), DBG_NAME("dataTypeMaskTest"));
-    scaff_->builder_.CreateCondBr(cond, isNothingBB, notNothingBB);
+    Value *dataMask = scaff_->builder_.CreateAnd(dType, CoInt32(Datum::typeDataMask), DBG_NAME("dataTypeMask"));
+    Value *isData = scaff_->builder_.CreateICmpNE(dataMask, CoInt32(0), DBG_NAME("isDataTest"));
+    scaff_->builder_.CreateCondBr(isData, notNothingBB, isNothingBB);
 
-    // Bad
     scaff_->builder_.SetInsertPoint(notNothingBB);
     Value *errObj = generateErrorNoSay(src);
     generateReturn(errObj);
 
-    // Good
     scaff_->builder_.SetInsertPoint(isNothingBB);
-
     return src;
+}
+
+Value *Compiler::generateIsWord(Value *src)
+{
+    Value *isa = generateGetDatumIsa(src);
+    Value *wordMask = scaff_->builder_.CreateAnd(isa, CoInt32(Datum::typeWord), DBG_NAME("wordMask"));
+    return scaff_->builder_.CreateICmpNE(wordMask, CoInt32(0), DBG_NAME("isWord"));
+}
+
+Value *Compiler::generateIsEmptyList(Value *src)
+{
+    return scaff_->builder_.CreateICmpEQ(src, CoAddr(EmptyList::instance()), DBG_NAME("isEmptyList"));
+}
+
+Value *Compiler::generateIsWordOrEmptyList(Value *src)
+{
+    Value *isWord = generateIsWord(src);
+    Value *isEmptyList = generateIsEmptyList(src);
+    return scaff_->builder_.CreateOr(isWord, isEmptyList, DBG_NAME("isWordOrEmptyList"));
+}
+
+Value *Compiler::generateWordOrEmptyListFromDatum(ASTNode *parent, Value *src)
+{
+    return generateValidationDatum(
+        parent, src, [this](Value *candidate) { return generateIsWordOrEmptyList(candidate); });
+}
+
+Value *Compiler::generateContentsListFromDatum(ASTNode *parent, Value *src)
+{
+    return generateValidationDatum(
+        parent, src, [this](Value *candidate) { return generateCallExtern(isContentsList, PaAddr(candidate)); });
+}
+
+Value *Compiler::generateNamedContentsListFromDatum(ASTNode *parent, Value *src)
+{
+    return generateValidationDatum(
+        parent, src, [this](Value *candidate) { return generateCallExtern(isNamedContentsList, PaAddr(candidate)); });
+}
+
+Value *Compiler::generateDefinableProcNameFromDatum(ASTNode *parent, Value *src)
+{
+    return generateValidationDatum(
+        parent, src, [this](Value *candidate) { return generateCallExtern(isDefinableProcName, PaAddr(candidate)); });
+}
+
+Value *Compiler::generateDefineTextFromDatum(ASTNode *parent, Value *src)
+{
+    return generateValidationDatum(
+        parent, src, [this](Value *candidate) { return generateCallExtern(isDefineText, PaAddr(candidate)); });
 }
 
 Value *Compiler::generateWordFromDatum(ASTNode *parent, Value *src)
@@ -686,7 +1388,7 @@ Value *Compiler::generateArrayFromDatum(ASTNode *parent, Value *src)
     return generateFromDatum(Datum::typeArray, parent, src);
 }
 
-Value *Compiler::genLiteral(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genLiteral(const DatumPtr &node, TypeMask expected)
 {
     DatumPtr literalPtr = node.astnodeValue()->childAtIndex(0);
 
@@ -696,13 +1398,13 @@ Value *Compiler::genLiteral(const DatumPtr &node, RequestReturnType returnType)
     if (literalPtr.isWord())
     {
         Word *wVal = literalPtr.wordValue();
-        if (returnType == RequestReturnReal)
+        if (expected & TypeReal)
         {
             double val = wVal->numberValue();
             if (wVal->numberIsValid)
                 return CoDouble(val);
         }
-        if (returnType == RequestReturnBool)
+        if (expected & TypeBool)
         {
             bool val = wVal->boolValue();
             if (wVal->boolIsValid)
@@ -721,28 +1423,38 @@ Value *Compiler::generateVoidRetval(const DatumPtr &node)
     return CoAddr(node.astnodeValue());
 }
 
-Value *Compiler::genValueOf(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::generateLookupVarname(Value *nameAddr)
 {
+    Value *lookedUp = generateCallExtern(getDatumForVarname, PaAddr(scaff_->evaluator_), PaAddr(nameAddr));
+    BasicBlock *lookupBB = scaff_->builder_.GetInsertBlock();
     BasicBlock *noValueBB = scaff_->createBasicBlock(DBG_NAME("NoValue"));
     BasicBlock *hasValueBB = scaff_->createBasicBlock(DBG_NAME("hasValue"));
 
     scaff_->addColdPathBlocks(noValueBB);
 
-    Word *varName = node.astnodeValue()->childAtIndex(0).wordValue();
-    Value *nameAddr = CoAddr(varName);
-    Value *retval = generateCallExtern(getDatumForVarname, PaAddr(nameAddr));
-
-    Value *dType = generateGetDatumIsa(retval);
+    Value *dType = generateGetDatumIsa(lookedUp);
     Value *mask = scaff_->builder_.CreateAnd(dType, CoInt32(Datum::typeDataMask), DBG_NAME("dataMask"));
     Value *cond = scaff_->builder_.CreateICmpEQ(mask, CoInt32(0), DBG_NAME("dataMaskTest"));
     scaff_->builder_.CreateCondBr(cond, noValueBB, hasValueBB);
 
+    // Unbound. Run ERRACT if it has a value; a datum from it stands in for the lookup.
     scaff_->builder_.SetInsertPoint(noValueBB);
-    Value *errObj = generateErrorNoValue(nameAddr);
-    generateReturn(errObj);
+    Value *handlerResult = generateCallExtern(handleNoValue, PaAddr(scaff_->evaluator_), PaAddr(nameAddr));
+    handlerResult = generateNotFlowControl(handlerResult);
+    BasicBlock *recoveredBB = scaff_->builder_.GetInsertBlock();
+    scaff_->builder_.CreateBr(hasValueBB);
 
     scaff_->builder_.SetInsertPoint(hasValueBB);
+    PHINode *retval = scaff_->builder_.CreatePHI(TyAddr, 2, DBG_NAME("lookup"));
+    retval->addIncoming(lookedUp, lookupBB);
+    retval->addIncoming(handlerResult, recoveredBB);
     return retval;
+}
+
+Value *Compiler::genValueOf(const DatumPtr &node, TypeMask expected)
+{
+    Word *varName = node.astnodeValue()->childAtIndex(0).wordValue();
+    return generateLookupVarname(CoAddr(varName));
 }
 
 Value *Compiler::ensureCoroutineFrame()
@@ -764,19 +1476,19 @@ Value *Compiler::ensureCoroutineFrame()
     // Coroutine frame: id -> size -> alloc -> begin
     // llvm.coro.id(i32 align, ptr promise, ptr coroutine, ptr info) -> token
     Function *coroIdFn = Intrinsic::getOrInsertDeclaration(scaff_->theModule_.get(), Intrinsic::coro_id);
-    scaff_->coroutineToken_ = scaff_->builder_.CreateCall(
-        coroIdFn, {CoInt32(0), CoAddr(0), CoAddr(0), CoAddr(0)}, DBG_NAME("id"));
+    scaff_->coroutineToken_ =
+        scaff_->builder_.CreateCall(coroIdFn, {CoInt32(0), CoAddr(0), CoAddr(0), CoAddr(0)}, DBG_NAME("id"));
     Value *coroutineCallToken = scaff_->coroutineToken_;
 
     Function *coroSizeFn = Intrinsic::getOrInsertDeclaration(scaff_->theModule_.get(), Intrinsic::coro_size, {TyInt32});
     Value *coroutineSize = scaff_->builder_.CreateCall(coroSizeFn, {}, DBG_NAME("size"));
 
-    Function *coroAlignFn = Intrinsic::getOrInsertDeclaration(scaff_->theModule_.get(), Intrinsic::coro_align, {TyInt32});
+    Function *coroAlignFn =
+        Intrinsic::getOrInsertDeclaration(scaff_->theModule_.get(), Intrinsic::coro_align, {TyInt32});
     Value *coroutineAlign = scaff_->builder_.CreateCall(coroAlignFn, {}, DBG_NAME("align"));
 
-    Value *coroutineAlloc = generateCallExtern(
-        q_malloc, PaAddr(scaff_->evaluator_), PaInt32(coroutineSize), PaInt32(coroutineAlign));
-    
+    Value *coroutineAlloc =
+        generateCallExtern(q_malloc, PaAddr(scaff_->evaluator_), PaInt32(coroutineSize), PaInt32(coroutineAlign));
 
     Function *coroBeginFn = Intrinsic::getOrInsertDeclaration(scaff_->theModule_.get(), Intrinsic::coro_begin);
     auto *coroBeginCall = cast<CallInst>(
@@ -789,48 +1501,64 @@ Value *Compiler::ensureCoroutineFrame()
     return scaff_->coroutineHandle_;
 }
 
-Value *Compiler::generateCallList(Value *list, RequestReturnType returnType)
+void Compiler::generateCoroSuspend()
 {
-    // Explicit control: push list onto evaluation stack, suspend so driver can run it, then pop and return result.
-    generateCallExtern(pushListOntoEvaluationStack, PaAddr(scaff_->evaluator_), PaAddr(list));
-
     ensureCoroutineFrame();
 
-    // Suspend point: llvm.coro.suspend(token none, i1 false) -> i8 (0=resume, 1=destroy, default=suspend)
     Function *coroSuspendFn = Intrinsic::getOrInsertDeclaration(scaff_->theModule_.get(), Intrinsic::coro_suspend);
     Value *coroutineSuspend = scaff_->builder_.CreateCall(
         coroSuspendFn, {ConstantTokenNone::get(*scaff_->theContext_), CoBool(false)}, DBG_NAME("suspend"));
 
-    BasicBlock *continueBB = BasicBlock::Create(*scaff_->theContext_, DBG_NAME("continue"), scaff_->theFunction_);
+    BasicBlock *continueBB = scaff_->createBasicBlock(DBG_NAME("continue"));
     SwitchInst *sw = scaff_->builder_.CreateSwitch(coroutineSuspend, scaff_->suspendBB_, 2);
     sw->addCase(CoInt8(0), continueBB);
     sw->addCase(CoInt8(1), scaff_->cleanupBB_);
 
     scaff_->builder_.SetInsertPoint(continueBB);
+}
+
+Value *Compiler::generateCallList(Value *list)
+{
+    generateCallExtern(pushListOntoEvaluationStack, PaAddr(scaff_->evaluator_), PaAddr(list));
+    generateCoroSuspend();
     return generateCallExtern(getLastEvaluationResult, PaAddr(scaff_->evaluator_));
 }
 
-Value *Compiler::genExecProcedure(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::generateCallListContinuation(Value *list)
 {
-    AllocaInst *paramAry = generateChildrenAlloca(node.astnodeValue(), RequestReturnDatum, DBG_NAME("paramAry"));
+    return generateCallExtern(runListAfterCurrentList, PaAddr(scaff_->evaluator_), PaAddr(list));
+}
+
+Value *Compiler::genExecProcedure(const DatumPtr &node, TypeMask expected)
+{
+    ASTNode *ast = node.astnodeValue();
+    DatumPtr proc = ast->procedure_;
+    if (proc.datumValue()->isa_ == Datum::typeProcedure && proc.procedureValue()->isMacro_)
+    {
+        // Command position (Nothing is acceptable) splices the whole output list.
+        // An input must be exactly one expression.
+        ast->macroExpectsSingleExpression_ = (expected & TypeNothing) == 0;
+    }
+
+    CallSite cs(this, node, TypeDatum);
+    AllocaInst *paramAry = cs.allocaAry(DBG_NAME("paramAry"));
     Value *vAstnodeValue = CoAddr(node.astnodeValue());
     Value *vParamArySize = CoInt32(node.astnodeValue()->countOfChildren());
-    generateCallExtern(beginProcedure, PaAddr(scaff_->evaluator_), PaAddr(vAstnodeValue), PaAddr(paramAry), PaInt32(vParamArySize));
+    OutputRequired outputRequired = OutputRequired::AcceptNothing;
+    if ((expected & TypeNothing) == 0)
+        outputRequired = OutputRequired::RequireValue;
+    else if (ast->inSequenceTail_ && (expected & ~TypeNothing) != 0)
+        outputRequired = OutputRequired::InheritIfLastLine;
+    generateCallExtern(beginProcedure,
+                       PaAddr(scaff_->evaluator_),
+                       PaAddr(vAstnodeValue),
+                       PaAddr(paramAry),
+                       PaInt32(vParamArySize),
+                       PaInt32(CoInt32(static_cast<int32_t>(outputRequired))));
+    endAllocaLifetime(paramAry);
 
-    ensureCoroutineFrame();
-
-    // Suspend point: llvm.coro.suspend(token none, i1 false) -> i8 (0=resume, 1=destroy, default=suspend)
-    Function *coroSuspendFn = Intrinsic::getOrInsertDeclaration(scaff_->theModule_.get(), Intrinsic::coro_suspend);
-    Value *coroutineSuspend = scaff_->builder_.CreateCall(
-        coroSuspendFn, {ConstantTokenNone::get(*scaff_->theContext_), CoBool(false)}, DBG_NAME("suspend"));
-
-    BasicBlock *continueBB = BasicBlock::Create(*scaff_->theContext_, DBG_NAME("continue"), scaff_->theFunction_);
-    SwitchInst *sw = scaff_->builder_.CreateSwitch(coroutineSuspend, scaff_->suspendBB_, 2);
-    sw->addCase(CoInt8(0), continueBB);
-    sw->addCase(CoInt8(1), scaff_->cleanupBB_);
-
-    scaff_->builder_.SetInsertPoint(continueBB);
-    return generateCallExtern(getLastEvaluationResult, PaAddr(scaff_->evaluator_));
+    generateCoroSuspend();
+    return cs.ret(generateCallExtern(getLastEvaluationResult, PaAddr(scaff_->evaluator_)));
 }
 
 Value *Compiler::generateWordFromDouble(Value *val)
@@ -840,7 +1568,8 @@ Value *Compiler::generateWordFromDouble(Value *val)
 
 Value *Compiler::generateWordFromBool(Value *val)
 {
-    return generateCallExtern(getWordForBool, PaAddr(scaff_->evaluator_), PaBool(val));
+    return scaff_->builder_.CreateSelect(
+        val, CoAddr(Word::trueWord()), CoAddr(Word::falseWord()), DBG_NAME("wordFromBool"));
 }
 
 Value *Compiler::generateErrorSystem()
@@ -887,6 +1616,43 @@ Value *Compiler::generateErrorNoOutput(Value *x, ASTNode *y)
     return errObj;
 }
 
+Value *Compiler::generateRecoverDidntOutput(Value *who, ASTNode *parent)
+{
+    Value *vY = CoAddr(parent->nodeName_.datumValue());
+    Value *handlerResult = generateCallExtern(handleDidntOutput, PaAddr(scaff_->evaluator_), PaAddr(who), PaAddr(vY));
+    return generateNotFlowControl(handlerResult);
+}
+
+Value *Compiler::generateMaybeoutputResult(ASTNode *parent, Value *child)
+{
+    BasicBlock *srcBB = scaff_->builder_.GetInsertBlock();
+    BasicBlock *nothingBB = scaff_->createBasicBlock(DBG_NAME("maybeNothing"));
+    BasicBlock *errBB = scaff_->createBasicBlock(DBG_NAME("maybeErr"));
+    BasicBlock *joinBB = scaff_->createBasicBlock(DBG_NAME("maybeJoin"));
+    scaff_->addColdPathBlocks(errBB);
+
+    Value *dType = generateGetDatumIsa(child);
+    Value *dataMask = scaff_->builder_.CreateAnd(dType, CoInt32(Datum::typeDataMask), DBG_NAME("dataTypeMask"));
+    Value *isData = scaff_->builder_.CreateICmpNE(dataMask, CoInt32(0), DBG_NAME("isDataTest"));
+    scaff_->builder_.CreateCondBr(isData, joinBB, nothingBB);
+
+    scaff_->builder_.SetInsertPoint(nothingBB);
+    Value *required = generateCallExtern(procedureOutputRequired);
+    scaff_->builder_.CreateCondBr(required, errBB, joinBB);
+
+    scaff_->builder_.SetInsertPoint(errBB);
+    Value *recovered = generateRecoverDidntOutput(child, parent);
+    BasicBlock *recoveredBB = scaff_->builder_.GetInsertBlock();
+    scaff_->builder_.CreateBr(joinBB);
+
+    scaff_->builder_.SetInsertPoint(joinBB);
+    PHINode *retval = scaff_->builder_.CreatePHI(TyAddr, 3, DBG_NAME("maybeResult"));
+    retval->addIncoming(child, srcBB);
+    retval->addIncoming(child, nothingBB);
+    retval->addIncoming(recovered, recoveredBB);
+    return retval;
+}
+
 Value *Compiler::generateErrorNotEnoughInputs(ASTNode *x)
 {
     Value *vX = CoAddr(x->nodeName_.datumValue());
@@ -904,105 +1670,221 @@ Value *Compiler::generateImmediateReturn(llvm::Value *retval)
 {
     BasicBlock *bailoutBB = scaff_->createBasicBlock(DBG_NAME("bailout"));
     BasicBlock *throwAwayBB = scaff_->createBasicBlock(DBG_NAME("throwAway"));
+    scaff_->addColdPathBlocks(bailoutBB);
 
-    // We are going to return something at this point.
-    // However, there may be code after this point that we have to compile and then ignore.
-    // So we need to:
-    // 1. Allow the code before this point to execute.
-    // 2. Return the control operation.
-    // 3. Ignore any code after the return operation.
-    // To do this we allow the compiler to finish generating the code after the return operation,
-    // and insert it after a test that will always fail, so the code will never be executed.
-    Value *cond = scaff_->builder_.CreateICmpEQ(CoBool(1), CoBool(0), DBG_NAME("fakeTest"));
-    scaff_->builder_.CreateCondBr(cond, throwAwayBB, bailoutBB);
+    // Leave this path with the flow-control / error result. Remaining nodes on
+    // the line are still generated into throwAwayBB which has no predecessor.
+    scaff_->builder_.CreateBr(bailoutBB);
 
     scaff_->builder_.SetInsertPoint(bailoutBB);
     generateReturn(retval);
 
-    // Any code that the compiler has remaining to generate after the return operation will
-    // be placed here, and then ignored.
     scaff_->builder_.SetInsertPoint(throwAwayBB);
     return retval;
 }
 
-std::vector<Value *> Compiler::generateChildren(ASTNode *node, RequestReturnType returnType)
+std::vector<Value *> Compiler::generateChildren(ASTNode *node, TypeMask expected)
 {
     std::vector<Value *> retval;
     retval.reserve(node->countOfChildren());
     for (int i = 0; i < node->countOfChildren(); ++i)
     {
-        Value *v = generateChildOfNode(node, node->childAtIndex(i), returnType);
-        Value *casted = generateCast(v, node, node->childAtIndex(i), returnType);
+        Value *v = generateChildOfNode(node, node->childAtIndex(i), expected);
+        Value *casted = generateCast(v, node, node->childAtIndex(i), expected);
         retval.push_back(casted);
     }
 
     return retval;
 }
 
-AllocaInst *Compiler::generateChildrenAlloca(ASTNode *node, RequestReturnType returnType, const std::string &name)
+AllocaInst *Compiler::generateChildrenAlloca(ASTNode *node, TypeMask expected, const std::string &name)
 {
-    std::vector<Value *> children = generateChildren(node, returnType);
+    std::vector<Value *> children = generateChildren(node, expected);
     return generateAllocaAry(children, name);
+}
+
+Value *Compiler::allocaN(AllocaInst *ai)
+{
+    return CoInt32(static_cast<int32_t>(cast<ArrayType>(ai->getAllocatedType())->getNumElements()));
+}
+
+Value *Compiler::gepAllocaElem(AllocaInst *ai, unsigned i, const std::string &name)
+{
+    Type *ty = ai->getAllocatedType();
+    Q_ASSERT(ty->isArrayTy());
+    return scaff_->builder_.CreateConstInBoundsGEP2_32(ty, ai, 0, i, name);
+}
+
+void Compiler::beginAllocaLifetime(AllocaInst *ai)
+{
+    if (!skipAllocaLifetime(ai))
+        scaff_->builder_.CreateLifetimeStart(ai);
+}
+
+void Compiler::endAllocaLifetime(AllocaInst *ai)
+{
+    if (!skipAllocaLifetime(ai))
+        scaff_->builder_.CreateLifetimeEnd(ai);
 }
 
 AllocaInst *Compiler::generateAllocaAry(const std::vector<llvm::Value *> &values, const std::string &name)
 {
-    Value *childCount = CoInt32(values.size());
-    Value *offset = CoInt64(lljit_->getDataLayout().getPointerSize());
-    AllocaInst *retval = scaff_->builder_.CreateAlloca(TyAddr, childCount, name);
-    Value *aryPtr = retval;
-    for (int i = 0; i < values.size(); ++i)
+    AllocaInst *retval = scaff_->createEntryBlockArrayAlloca(TyAddr, values.size(), name);
+    beginAllocaLifetime(retval);
+    for (size_t i = 0; i < values.size(); ++i)
     {
-        scaff_->builder_.CreateStore(values[i], aryPtr);
-        if (i < values.size() - 1)
-            aryPtr = scaff_->builder_.CreatePtrAdd(aryPtr, offset, name + "Incr");
+        Value *ptr = gepAllocaElem(retval, static_cast<unsigned>(i), name);
+        scaff_->builder_.CreateStore(values[i], ptr);
     }
     return retval;
 }
 
-std::vector<Value *> Compiler::generateChildren(ASTNode *node, std::vector<RequestReturnType> returnTypeAry)
+Value *Compiler::generateDatumForTrace(Value *value)
 {
-    Q_ASSERT(node->countOfChildren() == returnTypeAry.size());
+    if (value->getType()->isDoubleTy())
+        return generateWordFromDouble(value);
+    if (value->getType()->isIntegerTy(1))
+        return generateWordFromBool(value);
+    Q_ASSERT(value->getType()->isPointerTy());
+    return value;
+}
+
+void Compiler::generateTraceBegin(ASTNode *node, const std::vector<Value *> &children)
+{
+    const QString key = node->nodeName_.toString(Datum::ToStringFlags_Key);
+    if (!Kernel::get().containsName(Kernel::NameMark::Traced, Kernel::NameKind::Procedures, key))
+        return;
+
+    std::vector<Value *> boxed;
+    boxed.reserve(children.size());
+    for (Value *child : children)
+        boxed.push_back(generateDatumForTrace(child));
+
+    Value *ary = boxed.empty() ? static_cast<Value *>(CoAddr(0))
+                               : static_cast<Value *>(generateAllocaAry(boxed, DBG_NAME("traceAry")));
+    Value *begin = generateCallExtern(stdTraceBegin,
+                                      PaAddr(scaff_->evaluator_),
+                                      PaAddr(CoAddr(node)),
+                                      PaAddr(ary),
+                                      PaInt32(CoInt32(static_cast<int32_t>(boxed.size()))));
+    if (auto *traceAry = dyn_cast<AllocaInst>(ary))
+        endAllocaLifetime(traceAry);
+    generateNotFlowControl(begin);
+}
+
+void Compiler::generateTraceEnd(ASTNode *node, Value *result)
+{
+    const QString key = node->nodeName_.toString(Datum::ToStringFlags_Key);
+    if (!Kernel::get().containsName(Kernel::NameMark::Traced, Kernel::NameKind::Procedures, key))
+        return;
+
+    Value *end = generateCallExtern(
+        stdTraceEnd, PaAddr(scaff_->evaluator_), PaAddr(CoAddr(node)), PaAddr(generateDatumForTrace(result)));
+    generateNotFlowControl(end);
+}
+
+std::vector<Value *> Compiler::generateChildren(ASTNode *node, std::vector<TypeMask> expectedAry)
+{
+    Q_ASSERT(node->countOfChildren() == expectedAry.size());
     std::vector<Value *> retval;
     retval.reserve(node->countOfChildren());
     for (int i = 0; i < node->countOfChildren(); ++i)
     {
-        retval.push_back(generateChildOfNode(node, node->childAtIndex(i), returnTypeAry[i]));
+        retval.push_back(generateChildOfNode(node, node->childAtIndex(i), expectedAry[i]));
     }
     for (int i = 0; i < node->countOfChildren(); ++i)
     {
-        retval[i] = generateCast(retval[i], node, node->childAtIndex(i), returnTypeAry[i]);
+        retval[i] = generateCast(retval[i], node, node->childAtIndex(i), expectedAry[i]);
     }
     return retval;
 }
 
-AllocaInst *Compiler::generateNumberAryFromDatum(ASTNode *parent, const DatumPtr &srcPtr, int32_t size)
+AllocaInst *Compiler::generateNumberAryFromDatum(ASTNode *parent,
+                                                 Value *src,
+                                                 int32_t size,
+                                                 const validatorFunction &elementOk)
 {
     Value *vSize = CoInt32(size);
-    Value *list = generateChild(parent, srcPtr, RequestReturnDatum);
-    Value *count = generateCallExtern(getCountOfList, PaAddr(list));
-    // There should be two doubles in the list
-    BasicBlock *noLikeBB = scaff_->createBasicBlock(DBG_NAME("noLike"));
-    BasicBlock *continueBB = scaff_->createBasicBlock(DBG_NAME("good"));
-    BasicBlock *gotPosBB = scaff_->createBasicBlock(DBG_NAME("gotPos"));
+    AllocaInst *ary = scaff_->createEntryBlockArrayAlloca(TyDouble, static_cast<uint64_t>(size), DBG_NAME("ary"));
+    beginAllocaLifetime(ary);
 
-    scaff_->addColdPathBlocks(noLikeBB);
+    auto isNumberList = [this, vSize, ary, size, &elementOk](Value *candidate) {
+        BasicBlock *notListBB = scaff_->createBasicBlock(DBG_NAME("notList"));
+        BasicBlock *isListBB = scaff_->createBasicBlock(DBG_NAME("isList"));
+        BasicBlock *tryFillBB = scaff_->createBasicBlock(DBG_NAME("tryFill"));
+        BasicBlock *isListDoneBB = scaff_->createBasicBlock(DBG_NAME("isListDone"));
+        BasicBlock *checkedBB = scaff_->createBasicBlock(DBG_NAME("checked"));
 
-    Value *countGood = scaff_->builder_.CreateICmpEQ(count, vSize, DBG_NAME("countTest"));
-    scaff_->builder_.CreateCondBr(countGood, continueBB, noLikeBB);
+        scaff_->addColdPathBlocks(notListBB);
 
-    scaff_->builder_.SetInsertPoint(noLikeBB);
-    Value *errWho = CoAddr(parent->nodeName_.datumValue());
-    Value *errObj = generateCallExtern(getErrorNoLike, PaAddr(scaff_->evaluator_), PaAddr(errWho), PaAddr(list));
-    generateReturn(errObj);
+        Value *dType = generateGetDatumIsa(candidate);
+        Value *mask = scaff_->builder_.CreateAnd(dType, CoInt32(Datum::typeList), DBG_NAME("dataTypeMask"));
+        Value *isList = scaff_->builder_.CreateICmpNE(mask, CoInt32(0), DBG_NAME("isListTest"));
+        scaff_->builder_.CreateCondBr(isList, isListBB, notListBB);
 
-    scaff_->builder_.SetInsertPoint(continueBB);
-    AllocaInst *ary = scaff_->builder_.CreateAlloca(TyDouble, vSize, DBG_NAME("ary"));
-    Value *isGood = generateCallExtern(getNumberAryFromList, PaAddr(list), PaAddr(ary));
-    Value *countCond = scaff_->builder_.CreateICmpEQ(isGood, CoInt32(1), DBG_NAME("countTest"));
-    scaff_->builder_.CreateCondBr(countCond, gotPosBB, noLikeBB);
+        scaff_->builder_.SetInsertPoint(notListBB);
+        scaff_->builder_.CreateBr(checkedBB);
 
-    scaff_->builder_.SetInsertPoint(gotPosBB);
+        scaff_->builder_.SetInsertPoint(isListBB);
+        Value *count = generateCallExtern(getCountOfList, PaAddr(candidate));
+        Value *countGood = scaff_->builder_.CreateICmpEQ(count, vSize, DBG_NAME("countTest"));
+        scaff_->builder_.CreateCondBr(countGood, tryFillBB, isListDoneBB);
+
+        scaff_->builder_.SetInsertPoint(tryFillBB);
+        Value *isGood = generateCallExtern(getNumberAryFromList, PaAddr(candidate), PaAddr(ary));
+        Value *fillGood = scaff_->builder_.CreateICmpEQ(isGood, CoInt32(1), DBG_NAME("fillTest"));
+
+        // Optional per-element predicate. Runs only after a complete numeric fill,
+        // and a failure still rejects the list (one ERRACT trip).
+        BasicBlock *elementsBB = nullptr;
+        BasicBlock *fillFailBB = nullptr;
+        Value *elementsOk = nullptr;
+        if (elementOk)
+        {
+            elementsBB = scaff_->createBasicBlock(DBG_NAME("elements"));
+            fillFailBB = scaff_->createBasicBlock(DBG_NAME("fillFail"));
+            scaff_->builder_.CreateCondBr(fillGood, elementsBB, fillFailBB);
+
+            scaff_->builder_.SetInsertPoint(elementsBB);
+            elementsOk = CoBool(true);
+            for (int32_t i = 0; i < size; ++i)
+            {
+                Value *ptr = gepAllocaElem(ary, static_cast<unsigned>(i), DBG_NAME("elemPtr"));
+                Value *elem = scaff_->builder_.CreateLoad(TyDouble, ptr, DBG_NAME("elem"));
+                elementsOk = scaff_->builder_.CreateAnd(elementsOk, elementOk(elem), DBG_NAME("elemOk"));
+            }
+            scaff_->builder_.CreateBr(isListDoneBB);
+
+            scaff_->builder_.SetInsertPoint(fillFailBB);
+            scaff_->builder_.CreateBr(isListDoneBB);
+        }
+        else
+        {
+            scaff_->builder_.CreateBr(isListDoneBB);
+        }
+
+        scaff_->builder_.SetInsertPoint(isListDoneBB);
+        PHINode *listOk = scaff_->builder_.CreatePHI(TyBool, elementOk ? 3 : 2, DBG_NAME("listOk"));
+        if (elementOk)
+        {
+            listOk->addIncoming(elementsOk, elementsBB);
+            listOk->addIncoming(CoBool(false), fillFailBB);
+        }
+        else
+        {
+            listOk->addIncoming(fillGood, tryFillBB);
+        }
+        listOk->addIncoming(CoBool(false), isListBB);
+        scaff_->builder_.CreateBr(checkedBB);
+
+        scaff_->builder_.SetInsertPoint(checkedBB);
+        PHINode *ok = scaff_->builder_.CreatePHI(TyBool, 2, DBG_NAME("isNumberList"));
+        ok->addIncoming(CoBool(false), notListBB);
+        ok->addIncoming(listOk, isListDoneBB);
+        return ok;
+    };
+
+    generateValidationDatum(parent, src, isNumberList);
     return ary;
 }
 
@@ -1011,12 +1893,10 @@ Value *Compiler::generateValidationDouble(ASTNode *parent, Value *src, const val
     BasicBlock *srcBB = scaff_->builder_.GetInsertBlock();
 
     BasicBlock *validateBB = scaff_->createBasicBlock(DBG_NAME("validate"));
-    BasicBlock *convertBB = scaff_->createBasicBlock(DBG_NAME("convert"));
     BasicBlock *erractBB = scaff_->createBasicBlock(DBG_NAME("errorAction"));
-    BasicBlock *bailoutBB = scaff_->createBasicBlock(DBG_NAME("bailout"));
     BasicBlock *acceptBB = scaff_->createBasicBlock(DBG_NAME("accept"));
 
-    scaff_->addColdPathBlocks(erractBB, convertBB, bailoutBB);
+    scaff_->addColdPathBlocks(erractBB);
 
     scaff_->builder_.CreateBr(validateBB);
 
@@ -1029,21 +1909,19 @@ Value *Compiler::generateValidationDouble(ASTNode *parent, Value *src, const val
 
     // The number is bad. Call handleBadDouble and maybe retry with the result.
     scaff_->builder_.SetInsertPoint(erractBB);
-    Value *handlerResult = generateCallExtern(handleBadDouble, PaAddr(scaff_->evaluator_), PaAddr(CoAddr(parent)), PaDouble(candidate));
-    Value *datamIsa = generateGetDatumIsa(handlerResult); // See if result is a datum.
-    Value *isDatumMasked = scaff_->builder_.CreateAnd(datamIsa, CoInt32(Datum::typeDataMask), DBG_NAME("isDatumMasked"));
-    Value *isDatumCond = scaff_->builder_.CreateICmpNE(isDatumMasked, CoInt32(0), DBG_NAME("isDatumCond"));
-    scaff_->builder_.CreateCondBr(isDatumCond, convertBB, bailoutBB);
+    Value *handlerResult =
+        generateCallExtern(handleBadDouble, PaAddr(scaff_->evaluator_), PaAddr(CoAddr(parent)), PaDouble(candidate));
+    handlerResult = generateNotFlowControl(handlerResult);
 
-    // A Word was returned. Convert it to a double and try validating it again.
-    scaff_->builder_.SetInsertPoint(convertBB);
-    Value *dVal = generateCallExtern(getDoubleForDatum, PaAddr(scaff_->evaluator_), PaAddr(handlerResult));
-    candidate->addIncoming(dVal, convertBB);
+    AllocaInst *out = scaff_->createEntryBlockAlloca(TyDouble, DBG_NAME("retryDoubleOut"));
+    beginAllocaLifetime(out);
+    Value *numberIsValid =
+        generateCallExtern(parseDoubleForDatum, PaAddr(scaff_->evaluator_), PaAddr(handlerResult), PaAddr(out));
+    Value *dVal = scaff_->builder_.CreateLoad(TyDouble, out, DBG_NAME("retryDouble"));
+    endAllocaLifetime(out);
+    dVal = scaff_->builder_.CreateSelect(numberIsValid, dVal, ConstantFP::getNaN(TyDouble), DBG_NAME("retryOrNaN"));
+    candidate->addIncoming(dVal, scaff_->builder_.GetInsertBlock());
     scaff_->builder_.CreateBr(validateBB);
-
-    // The number is bad, and ERRACT is not set. Return a DOESN'T LIKE error.
-    scaff_->builder_.SetInsertPoint(bailoutBB);
-    generateReturn(handlerResult);
 
     // The number is good. Continue.
     scaff_->builder_.SetInsertPoint(acceptBB);
@@ -1056,10 +1934,9 @@ Value *Compiler::generateValidationDatum(ASTNode *parent, Value *src, const vali
 
     BasicBlock *validateBB = scaff_->createBasicBlock(DBG_NAME("validate"));
     BasicBlock *erractBB = scaff_->createBasicBlock(DBG_NAME("errorAction"));
-    BasicBlock *bailoutBB = scaff_->createBasicBlock(DBG_NAME("bailout"));
     BasicBlock *acceptBB = scaff_->createBasicBlock(DBG_NAME("accept"));
 
-    scaff_->addColdPathBlocks(erractBB, bailoutBB);
+    scaff_->addColdPathBlocks(erractBB);
 
     scaff_->builder_.CreateBr(validateBB);
 
@@ -1072,16 +1949,11 @@ Value *Compiler::generateValidationDatum(ASTNode *parent, Value *src, const vali
 
     // The datum is bad. Call handleBadDatum and maybe retry with the result.
     scaff_->builder_.SetInsertPoint(erractBB);
-    Value *handlerResult = generateCallExtern(handleBadDatum, PaAddr(scaff_->evaluator_), PaAddr(CoAddr(parent)), PaAddr(candidate));
-    Value *datamIsa = generateGetDatumIsa(handlerResult); // See if result is a datum.
-    Value *isDatumMasked = scaff_->builder_.CreateAnd(datamIsa, CoInt32(Datum::typeDataMask), DBG_NAME("isDatumMasked"));
-    Value *isDatumCond = scaff_->builder_.CreateICmpNE(isDatumMasked, CoInt32(0), DBG_NAME("isDatumCond"));
-    candidate->addIncoming(handlerResult, erractBB);
-    scaff_->builder_.CreateCondBr(isDatumCond, validateBB, bailoutBB);
-
-    // The datum is bad, and ERRACT is not set. Return a DOESN'T LIKE error.
-    scaff_->builder_.SetInsertPoint(bailoutBB);
-    generateReturn(handlerResult);
+    Value *handlerResult =
+        generateCallExtern(handleBadDatum, PaAddr(scaff_->evaluator_), PaAddr(CoAddr(parent)), PaAddr(candidate));
+    handlerResult = generateNotFlowControl(handlerResult);
+    candidate->addIncoming(handlerResult, scaff_->builder_.GetInsertBlock());
+    scaff_->builder_.CreateBr(validateBB);
 
     // The datum is good. Continue.
     scaff_->builder_.SetInsertPoint(acceptBB);
@@ -1097,7 +1969,7 @@ void Compiler::generateReturn(Value *retval)
 void Compiler::generateWrapup()
 {
     scaff_->builder_.SetInsertPoint(scaff_->mainBailoutBB_);
- 
+
     if (scaff_->coroutineHandle_)
     {
         scaff_->builder_.CreateStore(ConstantPointerNull::get(TyAddr), scaff_->coroutineHandle_);
@@ -1106,7 +1978,8 @@ void Compiler::generateWrapup()
         scaff_->builder_.SetInsertPoint(scaff_->cleanupBB_);
         //   %mem = call ptr @llvm.coro.free(token %id, ptr %hdl)
         Function *coroFreeFn = Intrinsic::getOrInsertDeclaration(scaff_->theModule_.get(), Intrinsic::coro_free);
-        Value *memToFree = scaff_->builder_.CreateCall(coroFreeFn, {scaff_->coroutineToken_, scaff_->coroutineHandle_}, DBG_NAME("mem"));
+        Value *memToFree = scaff_->builder_.CreateCall(
+            coroFreeFn, {scaff_->coroutineToken_, scaff_->coroutineHandle_}, DBG_NAME("mem"));
         //   Only free when allocation was dynamic (mem non-null); skip when allocation was elided.
         Value *needFree = scaff_->builder_.CreateICmpNE(memToFree, CoAddr(0), DBG_NAME("needFree"));
         BasicBlock *dynFreeBB = BasicBlock::Create(*scaff_->theContext_, "cleanup.free", scaff_->theFunction_);
@@ -1122,7 +1995,8 @@ void Compiler::generateWrapup()
         scaff_->builder_.SetInsertPoint(scaff_->suspendBB_);
         //   call void @llvm.coro.end(ptr %hdl, i1 false, token none)
         Function *coroEndFn = Intrinsic::getOrInsertDeclaration(scaff_->theModule_.get(), Intrinsic::coro_end);
-        scaff_->builder_.CreateCall(coroEndFn, {scaff_->coroutineHandle_, CoBool(false), ConstantTokenNone::get(*scaff_->theContext_)});
+        scaff_->builder_.CreateCall(
+            coroEndFn, {scaff_->coroutineHandle_, CoBool(false), ConstantTokenNone::get(*scaff_->theContext_)});
         //   ret ptr %hdl
         scaff_->builder_.CreateRet(scaff_->coroutineHandle_);
     }
@@ -1132,17 +2006,191 @@ void Compiler::generateWrapup()
     }
 }
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Winvalid-offsetof"
-
-// Generate code to return a datum type (isa) of a given object.
 Value *Compiler::generateGetDatumIsa(Value *objAddr)
 {
-    const unsigned int isaOffset = offsetof(Datum, isa_);
-    Value *isaAddr = scaff_->builder_.CreatePtrAdd(objAddr, CoInt64(isaOffset), DBG_NAME("isaAddr"));
+    Q_ASSERT(objAddr->getType()->isPointerTy());
 
-    Value *dType = scaff_->builder_.CreateLoad(TyInt32, isaAddr, DBG_NAME("isaLoad"));
-    return dType;
+    OperandBundleDef nonnull("nonnull", ArrayRef<Value *>{objAddr});
+    scaff_->builder_.CreateAssumption(ConstantInt::getTrue(*scaff_->theContext_), nonnull);
+
+    Value *isaAddr = scaff_->builder_.CreateStructGEP(scaff_->datumHeaderTy_, objAddr, 1, DBG_NAME("isaAddr"));
+    LoadInst *load = scaff_->builder_.CreateAlignedLoad(TyInt32, isaAddr, Align(4), DBG_NAME("isaLoad"));
+    MDNode *empty = MDNode::get(*scaff_->theContext_, {});
+    load->setMetadata(LLVMContext::MD_noundef, empty);
+    load->setMetadata(LLVMContext::MD_range, scaff_->isaLoadRange_);
+    load->setMetadata(LLVMContext::MD_tbaa, scaff_->isaLoadTbaa_);
+    return load;
 }
 
-#pragma GCC diagnostic pop
+/***DOC ALLOWGETSET
+ALLOWGETSET						(variable)
+
+    if TRUE, indicates that an attempt to use a procedure that doesn't
+    exist should be taken as an implicit getter or setter procedure
+    (setter if the first three letters of the name are SET) for a variable
+    of the same name (without the SET if appropriate).
+
+COD***/
+
+/***DOC BUTTONACT
+BUTTONACT						(variable)
+
+    if nonempty, should be an instruction list that will be evaluated
+    whenever a mouse button is pressed.  Note that the user may have
+    released the button before the instructions are evaluated.  BUTTON
+    will still output which button was most recently pressed.  CLICKPOS
+    will output the position of the mouse cursor at the moment the
+    button was pressed; this may be different from MOUSEPOS if the
+    user moves the mouse after clicking.
+
+    Note that it's possible for the user to press a button during the
+    evaluation of the instruction list.  If this would confuse your
+    program, prevent it by temporarily setting BUTTONACT to the empty
+    list.  One easy way to do that is the following:
+
+        make "buttonact [button.action]
+
+        to button.action [:buttonact []]
+        ... ; whatever you want the button to do
+        end
+
+COD***/
+
+/***DOC CASEIGNOREDP
+CASEIGNOREDP						(variable)
+
+    if TRUE, indicates that lower case and upper case letters should be
+    considered equal by EQUALP, BEFOREP, MEMBERP, etc.  Logo initially
+    makes this variable TRUE, and buries it.
+
+COD***/
+
+/***DOC ARGV
+ARGV							(variable)
+
+    a list of every word on the command line used to start QLogo,
+    including the program name. See also COMMAND.LINE.
+
+COD***/
+
+/***DOC COMMAND.LINE
+COMMAND.LINE						(variable)
+
+    contains any text appearing after a hyphen on the command line
+    used to start Logo. The list is empty if there is no hyphen.
+
+COD***/
+
+/***DOC ERRACT
+ERRACT							(variable)
+
+    an instructionlist that will be run in the event of an error.
+    Typically has the value [PAUSE] to allow interactive debugging.
+
+COD***/
+
+/***DOC FULLPRINTP
+FULLPRINTP						(variable)
+
+    if TRUE, then words that were created using backslash or vertical bar
+    (to include characters that would otherwise not be treated as part of
+    a word) are printed with the backslashes or vertical bars shown, so
+    that the printed result could be re-read by Logo to produce the same
+    value.  If FULLPRINTP is TRUE then the empty word (however it was
+    created) prints as ||.  (Otherwise it prints as nothing at all.)
+
+COD***/
+
+/***DOC KEYACT
+KEYACT							(variable)
+
+    if nonempty, should be an instruction list that will be evaluated
+    whenever a key is pressed on the keyboard.  The instruction list
+    can use READCHAR to find out what key was pressed.  Note that only
+    keys that produce characters qualify; pressing SHIFT or CONTROL
+    alone will not cause KEYACT to be evaluated.
+
+    Note that it's possible for the user to press a key during the
+    evaluation of the instruction list.  If this would confuse your
+    program, prevent it by temporarily setting KEYACT to the empty
+    list.  One easy way to do that is the following:
+
+        make "keyact [key.action]
+
+        to key.action [:keyact []]
+        ... ; whatever you want the key to do
+        end
+
+COD***/
+
+/***DOC LOADNOISILY
+LOADNOISILY						(variable)
+
+    if TRUE, prints the names of procedures defined when loading
+    from a file (including the temporary file made by EDIT).
+
+COD***/
+
+/***DOC LOGOPLATFORM
+LOGOPLATFORM						(variable)
+
+    one of the following words: wxWidgets, X11, Windows, or
+    Unix-Nographics.
+
+
+
+COD***/
+
+/***DOC LOGOVERSION
+LOGOVERSION						(variable)
+
+    a real number indicating the Logo version number, e.g., 5.5
+
+COD***/
+
+/***DOC QLOGOVERSION
+QLOGOVERSION						(variable)
+
+    a string indicating the QLogo version in three parts, separated by
+    hyphens. The first part is the latest git tag. The second part is the number
+    number of commits since the latest tag. The third part is the commit
+    hash.
+
+    This is generated by CMake during the build process using information
+    from the git repository. A release build might not have a git repository,
+    so this variable will be "unknown".
+
+COD***/
+
+/***DOC PRINTDEPTHLIMIT
+PRINTDEPTHLIMIT						(variable)
+
+    if a nonnegative integer, indicates the maximum depth of sublist
+    structure that will be printed by PRINT, etc.
+
+COD***/
+
+/***DOC PRINTWIDTHLIMIT
+PRINTWIDTHLIMIT						(variable)
+
+    if a nonnegative integer, indicates the maximum number of members
+    in any one list that will be printed by PRINT, etc.
+
+COD***/
+
+/***DOC STARTUP
+STARTUP							(variable)
+
+    if assigned a list value in a file loaded by LOAD, that value is
+    run as an instructionlist after the loading.
+
+COD***/
+
+/***DOC UNBURYONEDIT
+UNBURYONEDIT						(variable)
+
+    if TRUE, causes any procedure defined during EDIT or LOAD to be
+    unburied, so that it will be saved by a later SAVE.  Files that
+    want to define and bury procedures must do it in that order.
+
+COD***/

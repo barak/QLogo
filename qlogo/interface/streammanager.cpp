@@ -22,19 +22,39 @@
 #include "flowcontrol.h"
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QIODevice>
 #include <QTextStream>
 
-/// @brief One open file: the QFile and QTextStream backing plus the TextStream
-/// wrapper and the mode it was opened with. The wrapper does not own the
-/// QFile/QTextStream, so all three are torn down together in closeStream().
+/// @brief One open stream: a file or an in-memory character buffer, the
+/// QTextStream wrapping it, the TextStream wrapper, and the mode it was opened
+/// with. The wrapper does not own the QFile/QString/QTextStream, so they are
+/// torn down together in closeStream().
 struct StreamManager::OpenStream
 {
     QFile *file = nullptr;
+    QString *buffer = nullptr;
     QTextStream *textStream = nullptr;
     TextStream *stream = nullptr;
     OpenMode mode = OpenMode::Read;
 };
+
+static QIODevice::OpenMode flagsForMode(OpenMode mode)
+{
+    switch (mode)
+    {
+    case OpenMode::Read:
+        return QIODevice::ReadOnly;
+    case OpenMode::Write:
+        return QIODevice::WriteOnly | QIODevice::Truncate;
+    case OpenMode::Append:
+        return QIODevice::WriteOnly | QIODevice::Append;
+    case OpenMode::Update:
+        return QIODevice::ReadWrite;
+    }
+    Q_ASSERT(false);
+    return QIODevice::ReadOnly;
+}
 
 StreamManager::StreamManager()
     : terminalStream_(new TextStream(nullptr))
@@ -42,10 +62,8 @@ StreamManager::StreamManager()
     , dribbleStream_(nullptr)
 {
     // Every role starts pointed at the terminal.
-    istreamStd_ = terminalStream_;
     istreamRead_ = terminalStream_;
     istreamProgram_ = terminalStream_;
-    ostreamStd_ = terminalStream_;
     ostreamWrite_ = terminalStream_;
     ostreamProgram_ = terminalStream_;
 
@@ -59,34 +77,35 @@ StreamManager::~StreamManager()
         closeStream(programReadStack_.takeLast());
     while (!programWriteStack_.isEmpty())
         closeStream(programWriteStack_.takeLast());
+    replStack_.clear();
     noDribble();
     delete terminalStream_;
 }
 
-StreamManager::OpenStream *StreamManager::openStream(const QString &filepath, OpenMode mode)
+bool StreamManager::isInteractiveCommander() const
 {
-    QIODevice::OpenMode flags;
-    switch (mode)
-    {
-    case OpenMode::Read:
-        flags = QIODevice::ReadOnly;
-        break;
-    case OpenMode::Write:
-        flags = QIODevice::WriteOnly | QIODevice::Truncate;
-        break;
-    case OpenMode::Append:
-        flags = QIODevice::WriteOnly | QIODevice::Append;
-        break;
-    case OpenMode::Update:
-        flags = QIODevice::ReadWrite;
-        break;
-    }
+    return !replStack_.isEmpty() && istreamProgram_ == terminalStream_;
+}
+
+bool StreamManager::writerOverlayActive() const
+{
+    return isInteractiveCommander() && replStack_.last().overlayActive;
+}
+
+TextStream *StreamManager::activeWriter() const
+{
+    return writerOverlayActive() ? terminalStream_ : ostreamWrite_;
+}
+
+StreamManager::OpenStream *StreamManager::openStream(const QString &filepath, OpenMode mode, const DatumPtr &filename)
+{
+    QIODevice::OpenMode flags = flagsForMode(mode);
 
     auto *file = new QFile(filepath);
     if (!file->open(flags))
     {
         delete file;
-        throw FCError::fileSystem();
+        throw FCError::cantOpen(filename);
     }
 
     // OPENUPDATE positions the file at the end for both reading and writing.
@@ -106,11 +125,16 @@ void StreamManager::closeStream(OpenStream *stream)
 {
     if (stream == nullptr)
         return;
-    stream->textStream->flush();
+    if (stream->textStream != nullptr)
+        stream->textStream->flush();
     delete stream->stream;     // TextStream wrapper (non-owning of the below)
     delete stream->textStream; // QTextStream
-    stream->file->close();
-    delete stream->file; // QFile
+    if (stream->file != nullptr)
+    {
+        stream->file->close();
+        delete stream->file;
+    }
+    delete stream->buffer;
     delete stream;
 }
 
@@ -143,9 +167,9 @@ DatumPtr StreamManager::readRawline(const QString &prompt)
     return istreamRead_->readRawlineWithPrompt(prompt);
 }
 
-DatumPtr StreamManager::readChar()
+DatumPtr StreamManager::readChars(int32_t count)
 {
-    return istreamRead_->readChar();
+    return istreamRead_->readChars(count);
 }
 
 QList<DatumPtr> StreamManager::readerLineHistory() const
@@ -167,16 +191,68 @@ bool StreamManager::keyAvailable() const
     return !istreamRead_->atEnd();
 }
 
+bool StreamManager::lineAvailable() const
+{
+    if (istreamRead_ == terminalStream_)
+        return Config::get().mainInterface()->lineQueueHasLine();
+    return !istreamRead_->atEnd();
+}
+
 /************ current-writer output ************/
 
 void StreamManager::print(const QString &text)
 {
-    ostreamWrite_->lprint(text);
+    activeWriter()->lprint(text);
 }
 
 void StreamManager::printToTerminal(const QString &text)
 {
-    ostreamStd_->lprint(text);
+    terminalStream_->lprint(text);
+}
+
+void StreamManager::clearText()
+{
+    Config::get().mainInterface()->clearScreenText();
+}
+
+void StreamManager::setTextCursor(int row, int col)
+{
+    Config::get().mainInterface()->setTextCursorPos(row, col);
+}
+
+void StreamManager::getTextCursor(int &row, int &col)
+{
+    Config::get().mainInterface()->getTextCursorPos(row, col);
+}
+
+void StreamManager::setTextColor(const QColor &foreground, const QColor &background)
+{
+    Config::get().mainInterface()->setTextColor(foreground, background);
+}
+
+void StreamManager::setTextFontSize(double size)
+{
+    Config::get().mainInterface()->setTextFontSize(size);
+}
+
+double StreamManager::textFontSize() const
+{
+    return Config::get().mainInterface()->getTextFontSize();
+}
+
+void StreamManager::setTextFontName(const QString &name)
+{
+    Config::get().mainInterface()->setTextFontName(name);
+}
+
+QString StreamManager::textFontName() const
+{
+    return Config::get().mainInterface()->getTextFontName();
+}
+
+QStringList StreamManager::allFontNames() const
+{
+    return Config::get().mainInterface()->getAllFontNames();
 }
 
 /************ read/write positions ************/
@@ -195,32 +271,35 @@ void StreamManager::setReadPos(qint64 pos)
     istreamRead_->seek(pos);
 }
 
-qint64 StreamManager::writePos() const
+qint64 StreamManager::writePos()
 {
-    if (ostreamWrite_ == terminalStream_)
+    TextStream *writer = activeWriter();
+    if (writer == terminalStream_)
         return 0;
-    return ostreamWrite_->pos();
+    writer->flush();
+    return writer->pos();
 }
 
 void StreamManager::setWritePos(qint64 pos)
 {
-    if (ostreamWrite_ == terminalStream_)
+    TextStream *writer = activeWriter();
+    if (writer == terminalStream_)
         return;
-    ostreamWrite_->seek(pos);
+    writer->seek(pos);
 }
 
 /************ roles ************/
 
-void StreamManager::setReader(const QString &name)
+void StreamManager::setReader(const QString &name, const DatumPtr &spec)
 {
-    if (name.isEmpty())
+    if (name.isEmpty() && spec.isNothing())
     {
         istreamRead_ = terminalStream_;
         return;
     }
     auto it = openStreams_.find(name);
     if (it == openStreams_.end())
-        throw FCError::fileSystem();
+        throw FCError::notOpen(spec.isNothing() ? DatumPtr(name) : spec);
     OpenStream *os = it.value();
     if ((os->mode != OpenMode::Read) && (os->mode != OpenMode::Update))
         throw FCError::fileSystem();
@@ -232,52 +311,88 @@ QString StreamManager::reader() const
     return nameForStream(istreamRead_);
 }
 
-void StreamManager::setWriter(const QString &name)
+void StreamManager::setWriter(const QString &name, const DatumPtr &spec)
 {
-    if (name.isEmpty())
+    if (name.isEmpty() && spec.isNothing())
     {
         ostreamWrite_ = terminalStream_;
-        return;
     }
-    auto it = openStreams_.find(name);
-    if (it == openStreams_.end())
-        throw FCError::fileSystem();
-    OpenStream *os = it.value();
-    if ((os->mode != OpenMode::Write) && (os->mode != OpenMode::Append) && (os->mode != OpenMode::Update))
-        throw FCError::fileSystem();
-    ostreamWrite_ = os->stream;
+    else
+    {
+        auto it = openStreams_.find(name);
+        if (it == openStreams_.end())
+            throw FCError::notOpen(spec.isNothing() ? DatumPtr(name) : spec);
+        OpenStream *os = it.value();
+        if ((os->mode != OpenMode::Write) && (os->mode != OpenMode::Append) && (os->mode != OpenMode::Update))
+            throw FCError::fileSystem();
+        ostreamWrite_ = os->stream;
+    }
+
+    // SETWRITE at a human prompt ends this session's overlay so PRINT follows
+    // the new writer. SETWRITE during LOAD leaves the overlay in place.
+    if (isInteractiveCommander())
+        replStack_.last().overlayActive = false;
 }
 
 QString StreamManager::writer() const
 {
-    return nameForStream(ostreamWrite_);
+    return nameForStream(activeWriter());
 }
 
 /************ pool management ************/
 
-void StreamManager::open(const QString &name, OpenMode mode)
+void StreamManager::open(const QString &name, OpenMode mode, const DatumPtr &spec)
 {
     if (isOpen(name))
-        throw FCError::fileSystem();
+        throw FCError::alreadyOpen(spec);
     QString filepath = filepathForFilename(DatumPtr(name));
-    openStreams_.insert(name, openStream(filepath, mode));
+    openStreams_.insert(name, openStream(filepath, mode, spec));
 }
 
-void StreamManager::close(const QString &name)
+void StreamManager::openBuffer(const QString &name, const DatumPtr &spec)
+{
+    if (isOpen(name))
+        throw FCError::alreadyOpen(spec);
+
+    auto *buffer = new QString;
+    auto *textStream = new QTextStream(buffer, QIODevice::WriteOnly | QIODevice::Truncate);
+
+    auto *os = new OpenStream;
+    os->buffer = buffer;
+    os->textStream = textStream;
+    os->stream = new TextStream(textStream);
+    os->mode = OpenMode::Write;
+    openStreams_.insert(name, os);
+}
+
+DatumPtr StreamManager::close(const QString &name, const DatumPtr &spec)
 {
     auto it = openStreams_.find(name);
     if (it == openStreams_.end())
-        throw FCError::fileSystem();
+        throw FCError::notOpen(spec);
     OpenStream *os = it.value();
 
-    // A role aliasing this stream reverts to the terminal.
+    // Reader/writer aliasing this stream revert to the terminal. Program and
+    // REPL stacks do not hold pool streams, so they are left alone.
     if (istreamRead_ == os->stream)
         istreamRead_ = terminalStream_;
     if (ostreamWrite_ == os->stream)
         ostreamWrite_ = terminalStream_;
 
+    DatumPtr bufferContents = nothing();
+    if (os->buffer != nullptr)
+    {
+        if (os->textStream != nullptr)
+            os->textStream->flush();
+        QString contents = *os->buffer;
+        if (contents.isNull())
+            contents = QStringLiteral("");
+        bufferContents = DatumPtr(contents);
+    }
+
     openStreams_.erase(it);
     closeStream(os);
+    return bufferContents;
 }
 
 void StreamManager::closeAll()
@@ -289,9 +404,12 @@ void StreamManager::closeAll()
     ostreamWrite_ = terminalStream_;
 }
 
-QStringList StreamManager::allOpen() const
+DatumPtr StreamManager::allOpen() const
 {
-    return openStreams_.keys();
+    ListBuilder builder;
+    for (const auto &name : openStreams_.keys())
+        builder.append(DatumPtr(name));
+    return builder.finishedList();
 }
 
 bool StreamManager::isOpen(const QString &name) const
@@ -310,15 +428,16 @@ void StreamManager::eraseFile(const QString &name)
 
 /************ dribble ************/
 
-void StreamManager::dribble(const QString &name)
+void StreamManager::dribble(const DatumPtr &filename)
 {
-    noDribble();
-    QString filepath = filepathForFilename(DatumPtr(name));
+    if (isDribbling())
+        throw FCError::alreadyDribbling();
+    QString filepath = filepathForFilename(filename);
     auto *file = new QFile(filepath);
     if (!file->open(QIODevice::Append))
     {
         delete file;
-        throw FCError::fileSystem();
+        throw FCError::cantOpen(filename);
     }
     dribbleFile_ = file;
     dribbleStream_ = new QTextStream(file);
@@ -382,7 +501,20 @@ DatumPtr StreamManager::readTerminalChar()
 void StreamManager::beginProgramRead(const DatumPtr &filename)
 {
     QString filepath = filepathForFilename(filename);
-    OpenStream *os = openStream(filepath, OpenMode::Read);
+    OpenStream *os = openStream(filepath, OpenMode::Read, filename);
+    programReadStack_.append(os);
+    istreamProgram_ = os->stream;
+}
+
+void StreamManager::beginProgramReadText(const QString &text)
+{
+    auto *buffer = new QString(text);
+    auto *textStream = new QTextStream(buffer, QIODevice::ReadOnly);
+    auto *os = new OpenStream;
+    os->buffer = buffer;
+    os->textStream = textStream;
+    os->stream = new TextStream(textStream);
+    os->mode = OpenMode::Read;
     programReadStack_.append(os);
     istreamProgram_ = os->stream;
 }
@@ -415,7 +547,7 @@ void StreamManager::endProgramRead()
 void StreamManager::beginProgramWrite(const DatumPtr &filename, bool append)
 {
     QString filepath = filepathForFilename(filename);
-    OpenStream *os = openStream(filepath, append ? OpenMode::Append : OpenMode::Write);
+    OpenStream *os = openStream(filepath, append ? OpenMode::Append : OpenMode::Write, filename);
     programWriteStack_.append(os);
     ostreamProgram_ = os->stream;
 }
@@ -433,6 +565,25 @@ void StreamManager::endProgramWrite()
     ostreamProgram_ = programWriteStack_.isEmpty() ? terminalStream_ : programWriteStack_.last()->stream;
 }
 
+/************ REPL / PAUSE ************/
+
+void StreamManager::beginRepl()
+{
+    ReplFrame frame;
+    frame.savedCommander = istreamProgram_;
+    frame.overlayActive = (ostreamWrite_ != terminalStream_);
+    replStack_.append(frame);
+    istreamProgram_ = terminalStream_;
+}
+
+void StreamManager::endRepl()
+{
+    if (replStack_.isEmpty())
+        return;
+    istreamProgram_ = replStack_.last().savedCommander;
+    replStack_.removeLast();
+}
+
 /************ file naming ************/
 
 void StreamManager::setPrefix(const DatumPtr &prefix)
@@ -448,6 +599,8 @@ DatumPtr StreamManager::prefix() const
 QString StreamManager::filepathForFilename(const DatumPtr &filenameP) const
 {
     QString filename = filenameP.wordValue()->toString();
+    if (QFileInfo(filename).isAbsolute())
+        return filename;
 
     if (filePrefix_.isWord())
     {

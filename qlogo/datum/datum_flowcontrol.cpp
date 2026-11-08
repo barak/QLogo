@@ -20,8 +20,8 @@
 
 #include "astnode.h"
 #include "flowcontrol.h"
-#include "workspace/kernel.h"
 #include "sharedconstants.h"
+#include "workspace/kernel.h"
 #include "workspace/procedures.h"
 #include <QObject>
 
@@ -29,47 +29,57 @@ void FCError::commonInit()
 {
     Kernel *k = &Kernel::get();
 
+    // ERROR's procedure and line members are the empty list when this error is
+    // not inside a procedure, or when no instruction line was running.
+    procedure() = emptyList();
+    line() = emptyList();
+
     // If the error is a bad default expression, don't report the procedure
-    // or line.
-    if (code_ != ERR_BAD_DEFAULT_EXPRESSION)
+    // or line. There is also no procedure when an error is created before
+    // the interpreter has a call frame (e.g. a missing startup script).
+    if (code_ != ERR_BAD_DEFAULT_EXPRESSION && !k->callFrameStack_.empty())
     {
         CallFrame *cf = k->currentCallFrame();
+        // (THROW "ERROR message) is reported where the throwing procedure was
+        // invoked, so a user procedure can look like a primitive. One-input
+        // THROW "ERROR stays on the THROW line.
+        const bool blameCaller = code_ == ERR_CUSTOM_THROW && k->callFrameStack_.size() >= 2;
+        if (blameCaller)
+            cf = &k->callFrameStack_[k->callFrameStack_.size() - 2];
+
         if (cf->sourceNode_.isASTNode())
         {
             procedure() = cf->sourceNode_.astnodeValue()->nodeName_;
-            line() = cf->topEvaluator()->list_;
+            if (Evaluator *ev = cf->topOwnEvaluator())
+            {
+                line() = ev->list_;
+                lineCaptured_ = true;
+            }
         }
     }
     k->currentError_ = DatumPtr(this);
 }
 
-FCError *FCError::custom(const DatumPtr &tag, DatumPtr message, const DatumPtr &output)
+FCError *FCError::fromThrow(const DatumPtr &tag, const DatumPtr &second)
 {
-    ErrCode code;
     if (tag.toString(ToStringFlags_Key) == QObject::tr("ERROR"))
     {
-        if (message.isNothing())
-        {
-            code = ERR_THROW;
-            message = DatumPtr(QObject::tr("Throw \"Error"));
-        }
-        else
-        {
-            code = ERR_CUSTOM_THROW;
-        }
+        if (second.isNothing())
+            return new FCError(ERR_THROW, QObject::tr("Throw \"Error"), tag, nothing());
+
+        // The second input is the message, not a value for CATCH "ERROR to output.
+        DatumPtr message = second.isWord() ? second : DatumPtr(new Word(second.toString(ToStringFlags_None)));
+        return new FCError(ERR_CUSTOM_THROW, message, tag, nothing());
     }
-    else
-    {
-        code = ERR_NO_CATCH;
-        message = DatumPtr(QObject::tr("Can't find catch tag for %1").arg(tag.toString(Datum::ToStringFlags_Show)));
-    }
-    return new FCError(code, message, tag, output);
+
+    QString message = QObject::tr("Can't find catch tag for %1").arg(tag.toString(Datum::ToStringFlags_Show));
+    return new FCError(ERR_NO_CATCH, message, tag, second);
 }
 
 FCError *FCError::fatalInternal()
 {
     auto *err = new FCError(ERR_FATAL_INTERNAL, QObject::tr("Fatal internal error"));
-    qFatal("%s\n", err->toString().toStdString().c_str());
+    qFatal("%s\n", err->toString().toUtf8().constData());
     return err;
 }
 
@@ -165,6 +175,20 @@ FCError *FCError::noValue(const DatumPtr &x)
     return new FCError(ERR_NO_VALUE, message);
 }
 
+FCError *FCError::macroReturnedNotList(const DatumPtr &value)
+{
+    QString shown = value.toString(Datum::ToStringFlags_Show);
+    QString message = QObject::tr("Macro returned %1 instead of a list").arg(shown);
+    return new FCError(ERR_MACRO_RETURNED_NOT_LIST, message);
+}
+
+FCError *FCError::multipleExpressions(const DatumPtr &runlist)
+{
+    QString message =
+        QObject::tr("Runlist %1 has more than one expression").arg(runlist.toString(Datum::ToStringFlags_Show));
+    return new FCError(ERR_LIST_HAS_MULTIPLE_EXPRESSIONS, message);
+}
+
 FCError *FCError::alreadyFilling()
 {
     QString message = QObject::tr("Already filling");
@@ -190,18 +214,48 @@ FCError *FCError::parenNf()
     return new FCError(ERR_PAREN_NF, message);
 }
 
+FCError *FCError::stackOverflow()
+{
+    return new FCError(ERR_STACK_OVERFLOW, QObject::tr("Stack overflow"));
+}
+
 FCError *FCError::isPrimitive(const DatumPtr &x)
 {
     QString message = QObject::tr("%1 is a primitive").arg(x.toString(Datum::ToStringFlags_Show));
     return new FCError(ERR_IS_PRIMITIVE, message);
 }
 
+FCError *FCError::alreadyDribbling()
+{
+    return new FCError(ERR_ALREADY_DRIBBLING, QObject::tr("already dribbling"));
+}
+
+FCError *FCError::notOpen(const DatumPtr &x)
+{
+    QString message = QObject::tr("File %1 not open").arg(x.toString(Datum::ToStringFlags_Show));
+    return new FCError(ERR_NOT_OPEN, message);
+}
+
+FCError *FCError::alreadyOpen(const DatumPtr &x)
+{
+    QString message = QObject::tr("File %1 already open").arg(x.toString(Datum::ToStringFlags_Show));
+    return new FCError(ERR_ALREADY_OPEN, message);
+}
+
+FCError *FCError::cantOpen(const DatumPtr &x)
+{
+    QString message = QObject::tr("I can't open file %1").arg(x.toString(Datum::ToStringFlags_Show));
+    return new FCError(ERR_CANT_OPEN, message);
+}
+
 QString FCError::toString(ToStringFlags, int, int, VisitedSet *) const
 {
     QString retval = message().toString();
-    if (!procedure().isNothing())
+    if (procedure().isWord())
     {
-        retval = QString("%1 in %2\n%3").arg(retval, procedure().toString(), line().toString(ToStringFlags_Show));
+        retval = QString("%1 in %2").arg(retval, procedure().toString());
+        if (lineCaptured_)
+            retval += QLatin1Char('\n') + line().toString(ToStringFlags_Show);
     }
     return retval;
 }

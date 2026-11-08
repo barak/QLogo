@@ -27,6 +27,7 @@
 #include <QDataStream>
 #include <QFile>
 #include <QFont>
+#include <QQueue>
 
 class QTransform;
 
@@ -48,22 +49,29 @@ class LogoInterfaceGUI : public LogoInterface
     int cursorRow_;
     int cursorCol_;
 
-    // cursorModeIsOverwrite is true if the cursor overwrites previously-written text, false if the cursor inserts text.
-    bool cursorModeIsOverwrite_ = false;
-
-    // Text returned from editor winow
+    // Text returned from the editor window, and whether the user saved.
     QString editorText_;
+    bool editorAccepted_ = false;
 
     double penSize_;
+    Qt::PenStyle penStyle_ = Qt::SolidLine;
+    Qt::PenCapStyle penCapStyle_ = Qt::SquareCap;
+    Qt::PenJoinStyle penJoinStyle_ = Qt::BevelJoin;
+    QList<qreal> penDashPattern_;
 
     double xbound_ = Config::get().initialBoundX_;
     double ybound_ = Config::get().initialBoundY_;
+    double scrunchX_ = 1.0;
+    double scrunchY_ = 1.0;
     bool canvasIsBounded_ = true;
 
     QVector2D mousePos_ = QVector2D(0, 0);
     QVector2D clickPos_ = QVector2D(0, 0);
     int lastButtonpressID_ = 0;
     bool isMouseButtonDown_ = false;
+
+    /// @brief Unsolicited keys. KEYACT prepends so READCHAR inside KEYACT sees that character first.
+    QQueue<QString> typeahead_;
 
     QColor currentBackgroundColor_ = Config::get().initialCanvasBackgroundColor_;
     QColor currentForegroundColor_ = Config::get().initialCanvasForegroundColor_;
@@ -79,9 +87,9 @@ class LogoInterfaceGUI : public LogoInterface
     QString labelFontName_;
     double labelFontSize_;
 
+  public:
     void processInputMessageQueue() override;
 
-  public:
     /// @brief Constructor for the LogoInterfaceGUI class.
     /// @param parent The parent Qt object.
     LogoInterfaceGUI(QObject *parent = nullptr);
@@ -93,7 +101,8 @@ class LogoInterfaceGUI : public LogoInterface
     void closeInterface() override;
 
     /// @brief Initializes the GUI interface.
-    void initialize() override;
+    /// @return Always true.
+    bool initialize() override;
 
     /// @brief Prints a string to the console.
     /// @param s The string to print.
@@ -104,6 +113,13 @@ class LogoInterfaceGUI : public LogoInterface
     /// @return The string entered by the user.
     QString inputRawlineWithPrompt(const QString &prompt) override;
 
+    /// @brief LINEP: do not peek the Psychi pipe. Same as KEYP until a line
+    /// message can be inspected without consuming it.
+    bool lineQueueHasLine() override;
+
+    /// @brief KEYP: true if typeahead has a character.
+    bool keyQueueHasChars() override;
+
     /// @brief Reads a character from the input queue.
     /// @return The character read from the input queue.
     /// @note This function is blocking. It will wait for a character to be
@@ -112,10 +128,12 @@ class LogoInterfaceGUI : public LogoInterface
 
     QString fileDialogModal() override;
 
-    /// @brief Edits text in the GUI.
+    /// @brief Edits text in the Psychi editor window.
     /// @param startText The text to edit.
-    /// @return The edited text.
-    QString editText(const QString &startText) override;
+    /// @param accepted Set to true if the user saved, false if they reverted.
+    /// @param title Window title; empty keeps the default "Editor".
+    /// @return The edited text if saved; empty if reverted.
+    QString editText(const QString &startText, bool *accepted, const QString &title = {}) override;
 
     /// @brief Sets the turtle position.
     /// @param newTurtlePos The new turtle position.
@@ -200,6 +218,11 @@ class LogoInterfaceGUI : public LogoInterface
     /// @note The X and Y coordinates of the lower left are the negative of the upper-right coordinates.
     /// The origin [0,0] is always in the center of the canvas.
     void setBounds(double x, double y) override;
+
+    /// @brief Sets the canvas scrunch (display-space X and Y scale) factors.
+    /// @param x The X scale factor.
+    /// @param y The Y scale factor.
+    void setScrunch(double x, double y) override;
 
     /// @brief Gets the X coordinate of the upper-right corner of the bounding box.
     /// @return The X coordinate of the upper-right corner of the bounding box.
@@ -288,14 +311,6 @@ class LogoInterfaceGUI : public LogoInterface
     /// @param backgroundColor The new background color.
     void setTextColor(const QColor &foregroundColor, const QColor &backgroundColor) override;
 
-    /// @brief Sets the cursor overwrite mode.
-    /// @param isOverwriteMode True if the cursor should overwrite text, false otherwise.
-    void setCursorOverwriteMode(bool isOverwriteMode) override;
-
-    /// @brief Gets if the cursor is in overwrite mode.
-    /// @return True if the cursor is in overwrite mode, false otherwise.
-    bool cursorOverwriteMode() const override;
-
     /// @brief Sets the label font size.
     /// @param aSize The new font size.
     void setLabelFontSize(double aSize) override;
@@ -316,8 +331,20 @@ class LogoInterfaceGUI : public LogoInterface
     /// @param aSize The new pen size.
     void setPensize(qreal) override;
 
+    /// @brief Sets the pen's line style, cap, join, and optional custom dash pattern.
+    void setPenPattern(Qt::PenStyle style,
+                       Qt::PenCapStyle cap,
+                       Qt::PenJoinStyle join,
+                       const QList<qreal> &dashPattern) override;
+
     /// @brief Clears all of the text from the GUI console.
     void clearScreenText() override;
+
+    /// @brief Delay execution by asking Psychi to run a timer.
+    /// @param msecs Milliseconds to wait.
+    /// @details Sends W_TIMER_START and blocks until W_TIMER_END arrives so
+    /// mouse, keyboard, and other UI messages can still be processed.
+    void mwait(unsigned long msecs) override;
 };
 
 #endif // LOGOINTERFACEGUI_H

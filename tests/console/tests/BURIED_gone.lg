@@ -1,0 +1,8 @@
+pprop "p "a 1
+bury [[] [] [p]]
+remprop "p "a
+show memberp "CASEIGNOREDP item 2 buried
+show memberp "UNBURYONEDIT item 2 buried
+show emptyp first buried
+show emptyp last buried
+show buriedp [[] [] [p]]

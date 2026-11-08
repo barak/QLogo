@@ -25,10 +25,14 @@
 #include <QColor>
 #include <QFont>
 #include <QImage>
+#include <QList>
 #include <QObject>
+#include <QPen>
 #include <QTextStream>
 #include <QThread>
 #include <QVector2D>
+#include <atomic>
+#include <csignal>
 
 class QTransform;
 class Kernel;
@@ -54,11 +58,15 @@ class LogoInterface : public QObject
 {
     Q_OBJECT
 
+  public:
+    /// @brief Drain pending Psychi pipe messages without blocking.
+    /// @note Console interfaces have no message queue. The GUI override records
+    /// S_SYSTEM / S_TOPLEVEL / S_PAUSE so the evaluator can consume them at a
+    /// safepoint. Safe to call when the queue is empty.
     virtual void processInputMessageQueue()
     {
     }
 
-  public:
     /// @brief Constructor
     /// @param parent The Qt parent object.
     LogoInterface(QObject *parent = nullptr);
@@ -69,14 +77,39 @@ class LogoInterface : public QObject
     /// @brief Returns the most recent interrupt signal that was received, if any. Resets the signal.
     /// @return The most recent interrupt signal that was received, if any.
     /// @note This method is meant to be called by the main loop to check for
-    /// signals that are sent to the application.
-    SignalsEnum_t latestSignal();
+    /// signals that are sent to the application. The common no-signal path is a
+    /// relaxed load; consume uses an atomic exchange so a handler cannot lose a
+    /// signal between the read and the clear.
+    static SignalsEnum_t latestSignal()
+    {
+        if (lastSignal_.load(std::memory_order_relaxed) == noSignal)
+            return noSignal;
+        return static_cast<SignalsEnum_t>(lastSignal_.exchange(noSignal, std::memory_order_relaxed));
+    }
+
+    /// @brief True if a signal has been recorded and not yet consumed by latestSignal().
+    /// @details Does not reset the signal. Lets a blocking reader tell an
+    /// interrupted read from end of input without trusting errno.
+    static bool signalPending()
+    {
+        return lastSignal_.load(std::memory_order_relaxed) != noSignal;
+    }
+
+    /// @brief Record an interrupt from a Unix signal or a Psychi pipe message.
+    /// @param incoming The signal to record.
+    /// @details SYSTEM outranks TOPLEVEL, which outranks PAUSE. Safe to call
+    /// from a signal handler: it only does lock-free atomic RMW on lastSignal_.
+    static void noteSignal(SignalsEnum_t incoming);
 
     /// @brief Initializes the interface.
-    /// @note The base method does nothing. Subclasses can override this method to perform
-    /// initialization tasks.
-    virtual void initialize()
+    /// @return True if the interface is ready; false if it could not start, in
+    /// which case it has already reported the reason and the caller should exit
+    /// normally with a failure code.
+    /// @note The base method does nothing and succeeds. Subclasses can override
+    /// this method to perform initialization tasks.
+    virtual bool initialize()
     {
+        return true;
     }
 
     /// @brief Reads a line of input from the user, with a prompt.
@@ -106,26 +139,48 @@ class LogoInterface : public QObject
 
     /// @brief The most recent signal that was received.
     /// The value of this variable is set by the handle_signal function. When the latestSignal
-    /// method is called, the value is reset to noSignal.
-    /// @note This is a static member to allow access from the signal handler.
-    static volatile SignalsEnum_t lastSignal_;
+    /// method is called, the value is reset to noSignal. A stronger signal (SYSTEM, then
+    /// TOPLEVEL, then PAUSE) is kept if a second signal arrives before the first is consumed.
+    /// @note Lock-free so the signal handler and the evaluator can RMW without
+    /// masking. static_assert in the .cpp requires is_always_lock_free.
+    static std::atomic<sig_atomic_t> lastSignal_;
 
     /// @brief Stops communication and initiates cleanup tasks.
     virtual void closeInterface();
 
+    /// @brief Give the terminal to an external editor (EDIT / EDITFILE).
+    /// @note The base method does nothing. The TUI override suspends ncurses so
+    /// the editor can use stdin, stdout, and stderr.
+    virtual void suspendForExternalEditor()
+    {
+    }
+
+    /// @brief Restore the interface after an external editor exits.
+    virtual void resumeAfterExternalEditor()
+    {
+    }
+
+    /// @brief Displays a file dialog modal.
+    /// @return The path of the selected file.
+    /// @note The base method triggers an error message. Subclasses can override this method to
+    /// perform the necessary tasks to display a file dialog modal.
     virtual QString fileDialogModal()
     {
         exit(1);
         return {};
     }
 
-    /// @brief Edits a text string.
+    /// @brief Present @p text in the editor and wait until the user is done.
     /// @param text The text to edit.
-    /// @return The edited text.
-    /// @note The base method triggers an error message. Subclasses can override this method to
-    /// perform the necessary tasks to edit the text.
-    virtual QString editText(const QString &text)
+    /// @param accepted Set to true if the user saved, false if they reverted.
+    /// @param title Window title; empty keeps the default "Editor".
+    /// @return The edited text if saved; empty if reverted.
+    /// @note GUI only. The base method aborts. CLI and TUI have no editor.
+    virtual QString editText(const QString &text, bool *accepted, const QString &title = {})
     {
+        Q_UNUSED(text);
+        Q_UNUSED(accepted);
+        Q_UNUSED(title);
         exit(1);
         return {};
     }
@@ -215,6 +270,13 @@ class LogoInterface : public QObject
     /// @note The base method calls and returns the result from QTextStream::atEnd().
     virtual bool keyQueueHasChars();
 
+    /// @brief LINEP: true if a complete line is waiting on the terminal.
+    /// @return True if a line can be read without waiting for more typing.
+    /// @note The base method peeks stdin in line mode and does not switch to
+    /// cbreak. Subclasses that do not read Logo input from stdin must override
+    /// this so a peek cannot steal protocol bytes.
+    virtual bool lineQueueHasLine();
+
     /// @brief Sets the bounds of the canvas.
     /// @param x The x coordinate of the upper right corner of the canvas.
     /// @param y The y coordinate of the upper right corner of the canvas.
@@ -223,6 +285,18 @@ class LogoInterface : public QObject
     /// perform the necessary tasks to set the bounds of the canvas.
     virtual void setBounds(double x, double y)
     {
+        exit(1);
+    }
+
+    /// @brief Sets the canvas scrunch (display-space X and Y scale) factors.
+    /// @param x The X scale factor.
+    /// @param y The Y scale factor.
+    /// @note The base method triggers an error message. Subclasses can override this method to
+    /// send the new scale to the graphics window.
+    virtual void setScrunch(double x, double y)
+    {
+        Q_UNUSED(x);
+        Q_UNUSED(y);
         exit(1);
     }
 
@@ -344,108 +418,90 @@ class LogoInterface : public QObject
     }
 
     /// @brief Clears the text on the screen.
-    /// @note The base method triggers an error message. Subclasses can override this method to
-    /// perform the necessary tasks to clear the text on the screen.
+    /// @note The base method does nothing; the command-line interface has no
+    /// text window. Subclasses can override this method to clear the GUI console.
     virtual void clearScreenText()
     {
-        exit(1);
     }
 
     /// @brief Sets the cursor position.
-    /// @param x The x coordinate of the cursor.
-    /// @param y The y coordinate of the cursor.
-    /// @note The base method triggers an error message. Subclasses can override this method to
-    /// perform the necessary tasks to set the cursor position.
+    /// @param x The row of the cursor.
+    /// @param y The column of the cursor.
+    /// @note The base method is a no-op; the command-line interface has no
+    /// text window. Subclasses can override this method to set the GUI cursor.
     virtual void setTextCursorPos(int x, int y)
     {
-        exit(1);
+        Q_UNUSED(x);
+        Q_UNUSED(y);
     }
 
     /// @brief Returns the cursor position.
-    /// @param x The x coordinate of the cursor.
-    /// @param y The y coordinate of the cursor.
-    /// @note The base method triggers an error message. Subclasses can override this method to
-    /// perform the necessary tasks to return the cursor position.
+    /// @param x The row of the cursor.
+    /// @param y The column of the cursor.
+    /// @note The base method reports [0 0]; the command-line interface has no
+    /// text window. Subclasses can override this method to return the GUI cursor.
     virtual void getTextCursorPos(int &x, int &y)
     {
-        exit(1);
+        x = 0;
+        y = 0;
     }
 
     /// @brief Sets the text color.
     /// @param text The color of the text.
     /// @param background The background color of the text.
-    /// @note The base method triggers an error message. Subclasses can override this method to
-    /// perform the necessary tasks to set the text color.
+    /// @note The base method is a no-op; the command-line interface has no
+    /// text window. Subclasses can override this method to set the GUI colors.
+    /// An invalid background leaves the existing background unchanged.
     virtual void setTextColor(const QColor &text, const QColor &background)
     {
-        exit(1);
+        Q_UNUSED(text);
+        Q_UNUSED(background);
     }
 
     /// @brief Sets the text font size.
     /// @param size The point size of the font.
-    /// @note The base method triggers an error message. Subclasses can override this method to
-    /// perform the necessary tasks to set the text font size.
+    /// @note The base method is a no-op; the command-line interface has no
+    /// text window. Subclasses can override this method to set the GUI font size.
     virtual void setTextFontSize(double size)
     {
-        exit(1);
+        Q_UNUSED(size);
     }
 
     /// @brief Returns the text font size.
     /// @return The text font point size.
-    /// @note The base method triggers an error message. Subclasses can override this method to
-    /// perform the necessary tasks to return the text font size.
+    /// @note The base method reports 12; the command-line interface has no
+    /// text window. Subclasses can override this method to return the GUI font size.
     virtual double getTextFontSize() const
     {
-        exit(1);
         return 12;
     }
 
     /// @brief Returns the text font name.
     /// @return The text font name.
-    /// @note The base method triggers an error message. Subclasses can override this method to
-    /// perform the necessary tasks to return the text font name.
+    /// @note The base method reports an empty name; the command-line interface
+    /// has no text window. Subclasses can override this method to return the GUI font name.
     virtual QString getTextFontName() const
     {
-        exit(1);
-        return {};
+        return QStringLiteral("");
     }
 
     /// @brief Sets the text font name.
     /// @param name The name of the font.
-    /// @note The base method triggers an error message. Subclasses can override this method to
-    /// perform the necessary tasks to set the text font name.
+    /// @note The base method is a no-op; the command-line interface has no
+    /// text window. Subclasses can override this method to set the GUI font name.
     virtual void setTextFontName(const QString &name)
     {
-        exit(1);
+        Q_UNUSED(name);
     }
 
     /// @brief Returns all the font names.
     /// @return A list of all the font names.
-    /// @note The base method triggers an error message. Subclasses can override this method to
-    /// perform the necessary tasks to return all the font names.
+    /// @note The command-line interface has no GUI font system, so the base
+    /// method returns an empty list. Psychi overrides this with the families
+    /// sent at GUI initialization.
     virtual QStringList getAllFontNames() const
     {
-        exit(1);
         return {};
-    }
-
-    /// @brief Sets the cursor overwrite mode.
-    /// @param mode True if the cursor should overwrite, false indicates the cursor should insert.
-    /// @note The base method triggers an error message. Subclasses can override this method to
-    /// perform the necessary tasks to set the cursor overwrite mode.
-    virtual void setCursorOverwriteMode(bool mode)
-    {
-        exit(1);
-    }
-
-    /// @brief Returns if the cursor is in overwrite mode.
-    /// @return True if the cursor is in overwrite mode, false indicates the cursor is in insert mode.
-    /// @note The base method triggers an error message. Subclasses can override this method to
-    /// perform the necessary tasks to return if the cursor is in overwrite mode.
-    virtual bool cursorOverwriteMode() const
-    {
-        exit(1);
-        return false;
     }
 
     /// @brief Sets the label font size.
@@ -532,6 +588,18 @@ class LogoInterface : public QObject
         exit(1);
     }
 
+    /// @brief Sets the pen's line style, cap, join, and optional custom dash pattern.
+    /// @param style The Qt pen style.
+    /// @param cap The Qt pen cap style.
+    /// @param join The Qt pen join style.
+    /// @param dashPattern Dash lengths used only when style is Qt::CustomDashLine.
+    /// @note The base method triggers an error message. Subclasses can override this method to
+    /// perform the necessary tasks to set the pen pattern.
+    virtual void setPenPattern(Qt::PenStyle, Qt::PenCapStyle, Qt::PenJoinStyle, const QList<qreal> &)
+    {
+        exit(1);
+    }
+
     /// @brief Queries the graphics engine if the pen size is valid.
     /// @param size The size of the pen, in pixels.
     /// @return True if the pen size is valid, false otherwise.
@@ -572,8 +640,26 @@ class LogoInterface : public QObject
         exit(1);
     }
 
+    /// @brief Delay execution for the given number of milliseconds.
+    /// @param msecs Milliseconds to wait. Zero flushes terminal output without sleeping.
+    /// @details The command-line interface flushes stdout and sleeps with nanosleep,
+    /// consuming a pending terminal signal if the sleep is interrupted. The GUI
+    /// override asks Psychi to run the timer so the UI stays responsive.
+    virtual void mwait(unsigned long msecs);
+
   protected:
     bool inputAtEof_ = false;
+
+    /// @brief Consume a pending terminal signal after a blocking read returned EINTR.
+    /// @details Throws FCError for TOPLEVEL and SYSTEM. Returns after PAUSE (or if
+    /// no Logo signal was pending) so the caller can retry the read.
+    void retryAfterInterrupt();
+
+    /// @brief Wait until stdin has data, a hangup, or a consumed terminal signal.
+    /// @return True if stdin is readable, false on hangup or error.
+    /// @details Polls in short slices so a signal delivered to another thread
+    /// is still noticed. Throws FCError for TOPLEVEL and SYSTEM.
+    bool waitForInteractiveInput();
 };
 
 #endif // LOGOINTERFACE_H

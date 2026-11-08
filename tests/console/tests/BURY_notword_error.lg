@@ -1,0 +1,4 @@
+bury [[a] [[b]] []]
+bury {a}
+bury [[a] {b} []]
+bury [[a] [b] [c] extra]

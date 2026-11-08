@@ -19,12 +19,18 @@
 
 #include "sharedconstants.h"
 #include <QDataStream>
+#include <QEvent>
+#include <QFont>
 #include <QMainWindow>
 #include <QProcess>
+#include <QTimer>
+#include <memory>
 
 class Canvas;
 class Console;
 class EditorWindow;
+class QKeyEvent;
+struct MessageDispatch;
 
 namespace Ui
 {
@@ -45,14 +51,14 @@ class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
-    enum windowMode_t
+    enum class windowMode_t
     {
         windowMode_noWait,
         windowMode_waitForChar,
         windowMode_waitForRawline,
     };
 
-    Ui::MainWindow *ui_;
+    std::unique_ptr<Ui::MainWindow> ui_;
 
     QByteArray readBuffer_;
     qint64 readBufferLen_ = 0;
@@ -60,6 +66,18 @@ class MainWindow : public QMainWindow
     windowMode_t windowMode_;
     bool hasShownCanvas_ = false;
     EditorWindow *editWindow_ = nullptr;
+    QTimer *waitTimer_ = nullptr;
+    // A direct member, not a child of this window. Parenting it would destroy it twice.
+    QProcess logoProcess_;
+    // Declared last so it is destroyed first and the writer pointer does not outlive logoProcess_.
+    struct ClearProcessPointer
+    {
+        ~ClearProcessPointer()
+        {
+            ProcessMessageWriter::process_ = nullptr;
+        }
+    };
+    ClearProcessPointer clearProcessPointer_;
 
     int startLogo();
     void beginReadRawlineWithPrompt(const QString &prompt);
@@ -69,7 +87,7 @@ class MainWindow : public QMainWindow
     void initialize();
     void introduceCanvas();
     void setSplitterforMode(ScreenModeEnum mode);
-    void openEditorWindow(const QString &startingText);
+    void openEditorWindow(const QString &title, const QString &startingText);
 
     void sendCanvasImage();
     void sendCanvasSvg();
@@ -77,11 +95,26 @@ class MainWindow : public QMainWindow
     // Show user a file dialog modal window.
     void fileDialogModal();
 
+    /// @brief Start a one-shot WAIT timer and reply with W_TIMER_END when it fires.
+    /// @param msecs Milliseconds to wait.
+    void startWaitTimer(qint32 msecs);
+
     void processReadBuffer();
+
+    friend struct MessageDispatch;
 
   protected:
     void closeEvent(QCloseEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
     QString findQlogoExe();
+
+    /// @brief If @p key is a Logo interrupt shortcut, send the matching pipe message.
+    /// @return True if the key was consumed.
+    bool maybeSendInterrupt(QKeyEvent *keyEvent);
+
+    /// @brief Forward a character key to qlogo while Logo is not reading a line or char.
+    /// @return True if the key was sent as C_CONSOLE_KEY_EVENT.
+    bool maybeSendKeyEvent(QKeyEvent *keyEvent);
 
   public:
     /// @brief Constructor.
@@ -89,17 +122,14 @@ class MainWindow : public QMainWindow
     /// @param parent The Qt parent widget.
     explicit MainWindow(QWidget *parent = nullptr);
 
+    /// @brief System monospace font for the console and canvas labels.
+    static QFont defaultFont();
+
     /// @brief Destructor.
     ~MainWindow() override;
 
     /// @brief Show the main window.
     void show();
-
-    /// @brief Handle a mouse button being pressed.
-    ///
-    /// @param position The position of the mouse button.
-    /// @param buttonID The ID of the button.
-    void mouseButtonWasPressed(QVector2D position, int buttonID);
 
   public slots:
 
@@ -122,7 +152,9 @@ class MainWindow : public QMainWindow
     void splitterHasMovedSlot(int, int);
 
     /// @brief Handle the editing being ended.
-    void editingHasEndedSlot(const QString &text);
+    /// @param accepted True if the user saved, false if they reverted.
+    /// @param text The edited text if saved; empty if reverted.
+    void editingHasEndedSlot(bool accepted, const QString &text);
 
     /// @brief Handle a mouse button being clicked.
     void mouseclickedSlot(QPointF QPointF, int buttonID);

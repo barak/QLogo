@@ -24,14 +24,17 @@
 class Procedures;
 class TextStream;
 
-/// @brief The Treeifier class contains a singleton class with a single public method,
-/// astFromList(), which is used to treeify a QLogo list into an Abstract Syntax Tree.
+/// @brief The Treeifier class treeifies a QLogo list into an Abstract Syntax Tree.
+/// @details astFromList() is reentrant: compiling a library row during name
+/// lookup must not clobber an outer parse.
 class Treeifier
 {
     DatumPtr currentToken_;
 
     void advanceToken();
     List *listIter_;
+    int depth_ = 0;
+    static constexpr int kMaxTreeifyDepth = 256;
 
     DatumPtr treeifyRootExp();
     DatumPtr treeifyExp();
@@ -41,7 +44,7 @@ class Treeifier
     DatumPtr treeifyTermexp();
     DatumPtr treeifyCommand(bool isVararg);
 
-    /// @brief Private constructor for singleton pattern.
+    /// @brief Private constructor. astFromList() creates a fresh instance per call.
     Treeifier() = default;
 
     ~Treeifier() = default;

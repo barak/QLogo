@@ -70,9 +70,10 @@ class RawStream
     /// @return The line as a Word object, or nothing if no input is available.
     DatumPtr readRawlineWithPrompt(const QString &prompt);
 
-    /// @brief Read a single character. No formatting is applied.
-    /// @return The character as a Character object, or an empty List object if no input is available.
-    DatumPtr readChar();
+    /// @brief Read up to count characters. No formatting is applied.
+    /// @param count Number of characters to read. Must be >= 0.
+    /// @return The characters as a Word, or an empty List if none were available.
+    DatumPtr readChars(int32_t count);
 };
 
 
@@ -131,11 +132,11 @@ class ListReader
     bool initializeBaseLevelReading(const QString &prompt);
 
     DatumPtr processCharacterLoop(ListBuilder &builder, QString &currentWord, bool &isCurrentWordVbarred,
-    bool isBaseLevel, bool makeArray, bool shouldRemoveComments);
+    bool isBaseLevel, bool makeArray, bool shouldRemoveComments, int &parenDepth);
 
     void addCurrentWordToBuilder(ListBuilder &builder, QString &currentWord, bool isCurrentWordVbarred);
 
-    bool finalizeResult(ListBuilder &builder, bool isBaseLevel, bool makeArray, DatumPtr &result);
+    bool finalizeResult(ListBuilder &builder, bool isBaseLevel, bool makeArray, int parenDepth, DatumPtr &result);
 
     bool processVbarredCharacter(ushort c, bool &isVbarred, bool &isCurrentWordVbarred, QString &currentWord);
 
@@ -181,7 +182,7 @@ class TextStream
 
     DatumPtr readRawlineWithPrompt(const QString &prompt);
 
-    DatumPtr readChar();
+    DatumPtr readChars(int32_t count);
 
     void lprint(const QString &text);
 

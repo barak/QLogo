@@ -1,10 +1,14 @@
-//===-- qlogo/communication.cpp - Communication implementations -------*- C++ -*-===//
+//===-- compiler/compiler_communication.cpp - Communication implementations -------*- C++ -*-===//
 //
-// Copyright 2017-2024 Jason Sikes
+// Copyright 2017-2026 Jason Sikes
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted under the conditions specified in the
 // license found in the LICENSE file in the project root.
+//
+// The /***DOC ... COD***/ help text and the /***LIB ... BIL***/ Logo
+// library procedures in this file are licensed separately under the
+// GNU General Public License, version 3 only. See the COPYRIGHT file.
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -14,9 +18,11 @@
 ///
 //===----------------------------------------------------------------------===//
 
+#include "astnode.h"
 #include "compiler.h"
-#include "compiler_internal.h"
-#include "workspace/exports.h"
+#include "interface/streammanager.h"
+#include "sharedconstants.h"
+#include "workspace/exports.inc"
 
 using namespace llvm;
 using namespace llvm::orc;
@@ -36,16 +42,9 @@ printed around sublists.  Braces are always printed around arrays.
 COD***/
 // CMD PRINT 0 1 -1 n
 // CMD PR 0 1 -1 n
-Value *Compiler::genPrint(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genPrint(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnNothing);
-
-    AllocaInst *ary = generateChildrenAlloca(node.astnodeValue(), RequestReturnDatum, DBG_NAME("printAry"));
-    Value *useShow = CoBool(false);
-    Value *addNewline = CoBool(true);
-
-    return generateCallExtern(
-        stdWriteDatumAry, PaAddr(scaff_->evaluator_), PaAddr(CoAddr(node.astnodeValue())), PaAddr(ary), PaInt32(ary->getArraySize()), PaBool(useShow), PaBool(addNewline));
+    return generateWrite(node, expected, false, true);
 }
 
 /***DOC SHOW
@@ -58,16 +57,9 @@ SHOW thing
 
 COD***/
 // CMD SHOW 0 1 -1 n
-Value *Compiler::genShow(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genShow(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnNothing);
-
-    AllocaInst *ary = generateChildrenAlloca(node.astnodeValue(), RequestReturnDatum, DBG_NAME("showAry"));
-    Value *useShow = CoBool(true);
-    Value *addNewline = CoBool(true);
-
-    return generateCallExtern(
-        stdWriteDatumAry, PaAddr(scaff_->evaluator_), PaAddr(CoAddr(node.astnodeValue())), PaAddr(ary), PaInt32(ary->getArraySize()), PaBool(useShow), PaBool(addNewline));
+    return generateWrite(node, expected, true, true);
 }
 
 /***DOC TYPE
@@ -93,14 +85,1057 @@ TYPE thing
 
 COD***/
 // CMD TYPE 0 1 -1 n
-Value *Compiler::genType(const DatumPtr &node, RequestReturnType returnType)
+Value *Compiler::genType(const DatumPtr &node, TypeMask expected)
 {
-    Q_ASSERT(returnType && RequestReturnNothing);
-
-    AllocaInst *ary = generateChildrenAlloca(node.astnodeValue(), RequestReturnDatum, DBG_NAME("typeAry"));
-    Value *useShow = CoBool(false);
-    Value *addNewline = CoBool(false);
-
-    return generateCallExtern(
-        stdWriteDatumAry, PaAddr(scaff_->evaluator_), PaAddr(CoAddr(node.astnodeValue())), PaAddr(ary), PaInt32(ary->getArraySize()), PaBool(useShow), PaBool(addNewline));
+    return generateWrite(node, expected, false, false);
 }
+
+Value *Compiler::generateWrite(const DatumPtr &node, TypeMask expected, bool useShow, bool addWhitespace)
+{
+
+    CallSite cs(this, node, TypeDatum);
+    AllocaInst *ary = cs.allocaAry(DBG_NAME("writeAry"));
+
+    Value *retval = generateCallExtern(
+        stdWriteDatumAry,
+        PaAddr(scaff_->evaluator_),
+        PaAddr(CoAddr(node.astnodeValue())),
+        PaAddr(ary),
+        PaInt32(allocaN(ary)),
+        PaBool(CoBool(useShow)),
+        PaBool(CoBool(addWhitespace)));
+    endAllocaLifetime(ary);
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+/***DOC READLIST RL
+READLIST
+RL
+
+    reads a line from the read stream (initially the keyboard) and
+    outputs that line as a list.  The line is separated into members as
+    though it were typed in square brackets in an instruction.  If the
+    read stream is a file, and the end of file is reached, READLIST
+    outputs the empty word (not the empty list).  READLIST processes
+    backslash, vertical bar, and tilde characters in the read stream;
+    the output list will not contain these characters but they will have
+    had their usual effect.  Unmatched brackets, braces, or parentheses
+    also continue onto the next physical line.  READLIST does not,
+    however, treat semicolon as a comment character.
+
+COD***/
+// CMD READLIST 0 0 0 d
+// CMD RL 0 0 0 d
+Value *Compiler::genReadlist(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    Value *retval = generateCallExtern(stdReadList, PaAddr(scaff_->evaluator_));
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+/***DOC READWORD RW
+READWORD
+RW
+
+    reads a line from the read stream and outputs that line as a word.
+    The output is a single word even if the line contains spaces,
+    brackets, etc.  If the read stream is a file, and the end of file is
+    reached, READWORD outputs the empty list (not the empty word).
+    READWORD processes backslash, vertical bar, and tilde characters in
+    the read stream.  In the case of a tilde used for line continuation,
+    the output word DOES include the tilde and the newline characters, so
+    that the user program can tell exactly what the user entered.
+    Vertical bars in the line are also preserved in the output.
+    Backslash characters are not preserved in the output.
+
+COD***/
+// CMD READWORD 0 0 0 d
+// CMD RW 0 0 0 d
+Value *Compiler::genReadword(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    Value *retval = generateCallExtern(stdReadWord, PaAddr(scaff_->evaluator_));
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+/***DOC READRAWLINE
+READRAWLINE
+
+    reads a line from the read stream and outputs that line as a word.
+    The output is a single word even if the line contains spaces,
+    brackets, etc.  If the read stream is a file, and the end of file is
+    reached, READRAWLINE outputs the empty list (not the empty word).
+    READRAWLINE outputs the exact string of characters as they appear
+    in the line, with no special meaning for backslash, vertical bar,
+    tilde, or any other formatting characters.
+
+COD***/
+// CMD READRAWLINE 0 0 0 d
+Value *Compiler::genReadrawline(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    Value *retval = generateCallExtern(stdReadRawline, PaAddr(scaff_->evaluator_));
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+/***DOC READCHAR RC
+READCHAR
+RC
+
+    reads a single character from the read stream and outputs that
+    character as a word.  If the read stream is a file, and the end of
+    file is reached, READCHAR outputs the empty list (not the empty
+    word).  If the read stream is the keyboard, echoing is turned off
+    when READCHAR is invoked, and remains off until READLIST or READWORD
+    is invoked or a Logo prompt is printed.  Backslash, vertical bar,
+    and tilde characters have no special meaning in this context.
+
+COD***/
+
+/***DOC READCHARS RCS
+READCHARS num
+RCS num
+
+    reads "num" characters from the read stream and outputs those
+    characters as a word.  If the read stream is a file, and the end of
+    file is reached, READCHARS outputs the empty list (not the empty
+    word).  If the read stream is a terminal, echoing is turned off
+    when READCHARS is invoked, and remains off until READLIST or READWORD
+    is invoked or a Logo prompt is printed.  Backslash, vertical bar,
+    and tilde characters have no special meaning in this context.
+
+COD***/
+// CMD READCHAR 0 0 0 d
+// CMD RC 0 0 0 d
+// CMD READCHARS 1 1 1 d
+// CMD RCS 1 1 1 d
+Value *Compiler::genReadchar(const DatumPtr &node, TypeMask expected)
+{
+
+    CallSite cs(this, node, TypeReal);
+    const std::vector<Value *> &children = cs.children();
+
+    Value *count = CoInt32(1);
+    if (children.size() == 1)
+        count = generateNotNegativeInt32FromDouble(node.astnodeValue(), children[0]);
+
+    Value *retval = generateCallExtern(stdReadChars, PaAddr(scaff_->evaluator_), PaInt32(count));
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+/***DOC FILEDIALOG
+FILEDIALOG
+
+    GUI only. Presents a modal file dialog to the user. The user is then
+    given an opportunity to select a file. Outputs the file path of the file
+    selected by the user or an empty list if user pressed 'Cancel'.
+
+COD***/
+// CMD FILEDIALOG 0 0 0 d
+Value *Compiler::genFiledialog(const DatumPtr &node, TypeMask expected)
+{
+    CHECK_GRAPHICS_MODE
+    CallSite cs(this, node, TypeNothing);
+    Value *retval = generateCallExtern(stdFileDialog, PaAddr(scaff_->evaluator_));
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+/***DOC COPYRIGHT
+COPYRIGHT
+
+    command.  Prints a copyright message to the current write stream.
+
+COD***/
+// CMD COPYRIGHT 0 0 0 n
+Value *Compiler::genCopyright(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    Value *retval = generateCallExtern(
+        stdCopyright, PaAddr(scaff_->evaluator_), PaAddr(CoAddr(node.astnodeValue())));
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+Value *Compiler::generateDumpInstructionList(const DatumPtr &node, TypeMask expected,
+                                            addr_t (*dumpFn)(addr_t, addr_t, addr_t) noexcept,
+                                            const char *dumpFnName)
+{
+    Q_ASSERT(expected && TypeNothing);
+    Value *list = generateChild(node.astnodeValue(), 0, TypeDatum);
+    Value *retval = generateCallExternTyped(
+        dumpFn, dumpFnName,
+        {PaAddr(scaff_->evaluator_), PaAddr(CoAddr(node.astnodeValue())), PaAddr(list)});
+    return generateNotFlowControl(retval);
+}
+
+/***DOC SHOWIR
+SHOWIR instructionlist
+
+    command.  Compiles the instruction list and prints the LLVM module
+    IR after coroutine lowering and before function passes. Does not
+    run the list.
+
+COD***/
+// CMD SHOWIR 1 1 1 n
+Value *Compiler::genShowIR(const DatumPtr &node, TypeMask expected)
+{
+    return generateDumpInstructionList(node, expected, stdShowIR, "stdShowIR");
+}
+
+/***DOC SHOWCFG
+SHOWCFG instructionlist
+
+    command.  Compiles the instruction list and prints its LLVM control
+    flow graph as DOT. Does not run the list.
+
+COD***/
+// CMD SHOWCFG 1 1 1 n
+Value *Compiler::genShowCFG(const DatumPtr &node, TypeMask expected)
+{
+    return generateDumpInstructionList(node, expected, stdShowCFG, "stdShowCFG");
+}
+
+/***DOC SHOWMODULEIR
+SHOWMODULEIR instructionlist
+
+    command.  Compiles the instruction list and prints the full LLVM
+    module IR after coroutine lowering and function passes. Does not
+    run the list.
+
+COD***/
+// CMD SHOWMODULEIR 1 1 1 n
+Value *Compiler::genShowModuleIR(const DatumPtr &node, TypeMask expected)
+{
+    return generateDumpInstructionList(node, expected, stdShowModuleIR, "stdShowModuleIR");
+}
+
+/***DOC SHELL
+SHELL command
+(SHELL command wordflag)
+
+    Under Unix and macOS, outputs the result of running "command" as a
+    shell command.  (The command is sent to /bin/sh, not csh or other
+    alternatives.)  If the command is a literal list in the instruction
+    line, and if you want a backslash character sent to the shell, you
+    must use \\ to get the backslash through Logo's reader intact.  The
+    output is a list containing one member for each line generated by
+    the shell command.  Ordinarily each such line is represented by a
+    list in the output, as though the line were read using READLIST.  If
+    a second input is given, regardless of the value of the input, each
+    line is represented by a word in the output as though it were read
+    with READWORD.  Example:
+
+            to dayofweek
+            output first first shell [date]
+            end
+
+    This is "first first" to extract the first word of the first (and
+    only) line of the shell output.
+
+    Under Windows, Logo behaves as under Unix (except that DOS-style
+    commands are understood; use "dir" rather than "ls").
+
+COD***/
+// CMD SHELL 1 1 2 d
+Value *Compiler::genShell(const DatumPtr &node, TypeMask expected)
+{
+
+    CallSite cs(this, node, TypeDatum);
+    const std::vector<Value *> &children = cs.children();
+    Value *command = children[0];
+    auto validator = [this](Value *candidate) {
+        Value *isValid = generateCallExtern(isValidShellCommand, PaAddr(candidate));
+        return scaff_->builder_.CreateICmpEQ(isValid, CoBool(true), DBG_NAME("isValidShellCommandCond"));
+    };
+    command = generateValidationDatum(node.astnodeValue(), command, validator);
+
+    const bool hasWordflag = children.size() == 2;
+
+    Value *retval = generateCallExtern(
+        stdShell, PaAddr(scaff_->evaluator_), PaAddr(command), PaBool(CoBool(hasWordflag)));
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+/***DOC SETPREFIX
+SETPREFIX string
+
+    command.  Sets a prefix that will be used as the implicit beginning
+    of filenames in OPENREAD, OPENWRITE, OPENAPPEND, OPENUPDATE, LOAD,
+    and SAVE commands.  Logo will put the appropriate separator
+    character (slash for Unix, backslash for Windows) between the prefix
+    and the filename entered by the user.  On Windows, either a forward
+    slash or backslash can be used as a separator character.  The input
+    to SETPREFIX must be a word, unless it is the empty list, to indicate
+    that there should be no prefix.
+
+COD***/
+// CMD SETPREFIX 1 1 1 n
+Value *Compiler::genSetprefix(const DatumPtr &node, TypeMask expected)
+{
+
+    CallSite cs(this, node, TypeDatum);
+    Value *prefix = generateWordOrEmptyListFromDatum(node.astnodeValue(), cs.child(0));
+
+    generateCallExtern(stdSetPrefix, PaAddr(prefix));
+    return cs.ret(generateVoidRetval(node));
+}
+
+/***DOC PREFIX
+PREFIX
+
+    outputs the current file prefix, or [] if there is no prefix.
+    See SETPREFIX.
+
+COD***/
+// CMD PREFIX 0 0 0 d
+Value *Compiler::genPrefix(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    return cs.ret(generateCallExtern(stdPrefix, PaAddr(scaff_->evaluator_)));
+}
+
+/***DOC OPENREAD
+OPENREAD filename
+
+    command.  Opens the named file for reading.  The read position is
+    initially at the beginning of the file.
+
+COD***/
+// CMD OPENREAD 1 1 1 n
+Value *Compiler::genOpenread(const DatumPtr &node, TypeMask expected)
+{
+    return generateOpen(node, expected, static_cast<int32_t>(OpenMode::Read));
+}
+
+/***DOC OPENWRITE
+OPENWRITE filename
+
+    command.  Opens the named file for writing.  If the file already
+    existed, the old version is deleted and a new, empty file created.
+
+    OPENWRITE, but not the other OPEN variants, will accept as input
+    a list, in which the first element must be a variable name.  A
+    character buffer will be created. Any further members are ignored.
+
+    Any future references to this buffer may use the variable name as
+    well as a list object. So something like:
+
+        ? openwrite [foo]
+        ? setwrite "foo
+        ? close [foo]
+
+    will have the same effect as:
+
+        ? openwrite [foo]
+        ? setwrite [foo]
+        ? close "foo
+
+    When a SETWRITE is done, the printed characters are stored in the
+    buffer. When a CLOSE is done, the characters from the buffer
+    (treated as one long word, even if spaces and newlines are included)
+    become the value of the specified variable.
+
+COD***/
+// CMD OPENWRITE 1 1 1 n
+Value *Compiler::genOpenwrite(const DatumPtr &node, TypeMask expected)
+{
+    return generateOpen(node, expected, static_cast<int32_t>(OpenMode::Write));
+}
+
+/***DOC OPENAPPEND
+OPENAPPEND filename
+
+    command.  Opens the named file for writing.  If the file already
+    exists, the write position is initially set to the end of the old
+    file, so that newly written data will be appended to it.
+
+COD***/
+// CMD OPENAPPEND 1 1 1 n
+Value *Compiler::genOpenappend(const DatumPtr &node, TypeMask expected)
+{
+    return generateOpen(node, expected, static_cast<int32_t>(OpenMode::Append));
+}
+
+/***DOC OPENUPDATE
+OPENUPDATE filename
+
+    command.  Opens the named file for reading and writing.  The read and
+    write position is initially set to the end of the old file, if any.
+    Note: each open file has only one position, for both reading and
+    writing.  If a file opened for update is both READER and WRITER at
+    the same time, then SETREADPOS will also affect WRITEPOS and vice
+    versa.  Also, if you alternate reading and writing the same file,
+    you must SETREADPOS between a write and a read, and SETWRITEPOS
+    between a read and a write.
+
+COD***/
+// CMD OPENUPDATE 1 1 1 n
+Value *Compiler::genOpenupdate(const DatumPtr &node, TypeMask expected)
+{
+    return generateOpen(node, expected, static_cast<int32_t>(OpenMode::Update));
+}
+
+Value *Compiler::generateIsValidOpenSpec(Value *src)
+{
+    Value *isValid = generateCallExtern(isValidOpenSpec, PaAddr(src));
+    return scaff_->builder_.CreateICmpEQ(isValid, CoBool(true), DBG_NAME("isValidOpenSpec"));
+}
+
+Value *Compiler::generateOpenSpecFromDatum(ASTNode *parent, Value *src)
+{
+    return generateValidationDatum(parent, src, [this](Value *candidate) {
+        return generateIsValidOpenSpec(candidate);
+    });
+}
+
+Value *Compiler::generateOpen(const DatumPtr &node, TypeMask expected, int32_t mode)
+{
+
+    CallSite cs(this, node, TypeDatum);
+    Value *spec = cs.child(0);
+    if (mode == static_cast<int32_t>(OpenMode::Write))
+        spec = generateOpenSpecFromDatum(node.astnodeValue(), spec);
+    else
+        spec = generateFromDatum(Datum::typeWord, node.astnodeValue(), spec);
+
+    Value *retval = generateCallExtern(
+        stdOpen,
+        PaAddr(scaff_->evaluator_),
+        PaAddr(CoAddr(node.astnodeValue())),
+        PaAddr(spec),
+        PaInt32(CoInt32(mode)));
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+/***DOC CLOSE
+CLOSE filename
+
+    command.  Closes the named file.  If the file was currently the
+    reader or writer, then the reader or writer is changed to the
+    keyboard or screen, as if SETREAD [] or SETWRITE [] had been done.
+
+COD***/
+// CMD CLOSE 1 1 1 n
+Value *Compiler::genClose(const DatumPtr &node, TypeMask expected)
+{
+
+    CallSite cs(this, node, TypeDatum);
+    Value *spec = generateOpenSpecFromDatum(node.astnodeValue(), cs.child(0));
+
+    Value *retval = generateCallExtern(
+        stdClose,
+        PaAddr(scaff_->evaluator_),
+        PaAddr(CoAddr(node.astnodeValue())),
+        PaAddr(spec));
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+/***DOC ALLOPEN
+ALLOPEN
+
+    outputs a list whose members are the names of all files currently open.
+    This list does not include the dribble file, if any.
+
+COD***/
+// CMD ALLOPEN 0 0 0 d
+Value *Compiler::genAllopen(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    return cs.ret(generateCallExtern(stdAllOpen, PaAddr(scaff_->evaluator_)));
+}
+
+/***DOC ERASEFILE ERF
+ERASEFILE filename
+ERF filename
+
+    command.  Erases (deletes, removes) the named file, which should not
+    currently be open.
+
+COD***/
+// CMD ERASEFILE 1 1 1 n
+// CMD ERF 1 1 1 n
+Value *Compiler::genErasefile(const DatumPtr &node, TypeMask expected)
+{
+
+    CallSite cs(this, node, TypeDatum);
+    Value *filename = cs.child(0);
+    filename = generateFromDatum(Datum::typeWord, node.astnodeValue(), filename);
+
+    Value *retval = generateCallExtern(
+        stdEraseFile,
+        PaAddr(scaff_->evaluator_),
+        PaAddr(CoAddr(node.astnodeValue())),
+        PaAddr(filename));
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+/***DOC DRIBBLE
+DRIBBLE filename
+
+    command.  Creates a new file whose name is the input, like OPENWRITE,
+    and begins recording in that file everything that is read from the
+    keyboard or written to the terminal.  That is, this writing is in
+    addition to the writing to WRITER.  The intent is to create a
+    transcript of a Logo session, including things like prompt
+    characters and interactions.
+
+COD***/
+// CMD DRIBBLE 1 1 1 n
+Value *Compiler::genDribble(const DatumPtr &node, TypeMask expected)
+{
+
+    CallSite cs(this, node, TypeDatum);
+    Value *filename = cs.child(0);
+    filename = generateFromDatum(Datum::typeWord, node.astnodeValue(), filename);
+
+    Value *retval = generateCallExtern(
+        stdDribble,
+        PaAddr(scaff_->evaluator_),
+        PaAddr(CoAddr(node.astnodeValue())),
+        PaAddr(filename));
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+/***DOC NODRIBBLE
+NODRIBBLE
+
+    command.  Stops copying information into the dribble file, and
+    closes the file.
+
+COD***/
+// CMD NODRIBBLE 0 0 0 n
+Value *Compiler::genNodribble(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    generateCallExtern(stdNoDribble);
+    return cs.ret(generateVoidRetval(node));
+}
+
+/***DOC SETREAD
+SETREAD filename
+
+    command.  Makes the named file the read stream, used for READLIST,
+    etc.  The file must already be open with OPENREAD or OPENUPDATE.  If
+    the input is the empty list, then the read stream becomes the
+    keyboard, as usual.  Changing the read stream does not close the
+    file that was previously the read stream, so it is possible to
+    alternate between files.
+
+COD***/
+// CMD SETREAD 1 1 1 n
+Value *Compiler::genSetread(const DatumPtr &node, TypeMask expected)
+{
+
+    CallSite cs(this, node, TypeDatum);
+    Value *spec = generateWordOrEmptyListFromDatum(node.astnodeValue(), cs.child(0));
+
+    Value *retval = generateCallExtern(
+        stdSetRead,
+        PaAddr(scaff_->evaluator_),
+        PaAddr(CoAddr(node.astnodeValue())),
+        PaAddr(spec));
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+/***DOC READER
+READER
+
+    outputs the name of the current read stream file, or the empty list
+    if the read stream is the terminal.
+
+COD***/
+// CMD READER 0 0 0 d
+Value *Compiler::genReader(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    return cs.ret(generateCallExtern(stdReader, PaAddr(scaff_->evaluator_)));
+}
+
+/***DOC SETWRITE
+SETWRITE filename
+
+    command.  Makes the named file the write stream, used for PRINT,
+    etc.  The file must already be open with OPENWRITE, OPENAPPEND, or
+    OPENUPDATE.  If the input is the empty list, then the write stream
+    becomes the screen, as usual.  Changing the write stream does
+    not close the file that was previously the write stream, so it is
+    possible to alternate between files.
+
+    In QLogo the input may also be a list whose first element is a
+    variable name, matching OPENWRITE's character-buffer form.  The
+    buffer must already be open.
+
+COD***/
+// CMD SETWRITE 1 1 1 n
+Value *Compiler::genSetwrite(const DatumPtr &node, TypeMask expected)
+{
+
+    CallSite cs(this, node, TypeDatum);
+    Value *spec = cs.child(0);
+    auto validator = [this](Value *candidate) {
+        Value *openOk = generateIsValidOpenSpec(candidate);
+        Value *emptyList = generateIsEmptyList(candidate);
+        return scaff_->builder_.CreateOr(openOk, emptyList, DBG_NAME("isValidSetWrite"));
+    };
+    spec = generateValidationDatum(node.astnodeValue(), spec, validator);
+
+    Value *retval = generateCallExtern(
+        stdSetWrite,
+        PaAddr(scaff_->evaluator_),
+        PaAddr(CoAddr(node.astnodeValue())),
+        PaAddr(spec));
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+/***DOC WRITER
+WRITER
+
+    outputs the name of the current write stream file, or the empty list
+    if the write stream is the screen.
+
+COD***/
+// CMD WRITER 0 0 0 d
+Value *Compiler::genWriter(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    return cs.ret(generateCallExtern(stdWriter, PaAddr(scaff_->evaluator_)));
+}
+
+/***DOC SETREADPOS
+SETREADPOS charpos
+
+    command.  Sets the file pointer of the read stream file so that the
+    next READLIST, etc., will begin reading at the "charpos"th character
+    in the file, counting from 0.  (That is, SETREADPOS 0 will start
+    reading from the beginning of the file.)  Meaningless if the read
+    stream is the keyboard.
+
+COD***/
+// CMD SETREADPOS 1 1 1 n
+Value *Compiler::genSetreadpos(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeReal);
+    Value *num = cs.child(0);
+    Value *pos = generateNotNegativeInt32FromDouble(node.astnodeValue(), num);
+    generateCallExtern(stdSetReadPos, PaInt32(pos));
+    return cs.ret(generateVoidRetval(node));
+}
+
+/***DOC READPOS
+READPOS
+
+    outputs the file position of the current read stream file.
+
+COD***/
+// CMD READPOS 0 0 0 r
+Value *Compiler::genReadpos(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    return cs.ret(generateCallExtern(stdReadPos));
+}
+
+/***DOC SETWRITEPOS
+SETWRITEPOS charpos
+
+    command.  Sets the file pointer of the write stream file so that the
+    next PRINT, etc., will begin writing at the "charpos"th character
+    in the file, counting from 0.  (That is, SETWRITEPOS 0 will start
+    writing from the beginning of the file.)  Meaningless if the write
+    stream is the screen.
+
+COD***/
+// CMD SETWRITEPOS 1 1 1 n
+Value *Compiler::genSetwritepos(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeReal);
+    Value *num = cs.child(0);
+    Value *pos = generateNotNegativeInt32FromDouble(node.astnodeValue(), num);
+    generateCallExtern(stdSetWritePos, PaInt32(pos));
+    return cs.ret(generateVoidRetval(node));
+}
+
+/***DOC WRITEPOS
+WRITEPOS
+
+    outputs the file position of the current write stream file.
+
+COD***/
+// CMD WRITEPOS 0 0 0 r
+Value *Compiler::genWritepos(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    return cs.ret(generateCallExtern(stdWritePos));
+}
+
+/***DOC EOFP EOF?
+EOFP
+EOF?
+
+    predicate, outputs TRUE if there are no more characters to be
+    read in the read stream file, FALSE otherwise.
+
+COD***/
+// CMD EOFP 0 0 0 b
+// CMD EOF? 0 0 0 b
+Value *Compiler::genEofp(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    return cs.ret(generateCallExtern(stdEofp));
+}
+
+/***DOC KEYP KEY?
+KEYP
+KEY?
+
+    predicate, outputs TRUE if there are characters waiting to be
+    read from the read stream.  If the read stream is a file, this
+    is equivalent to NOT EOFP.  If the read stream is the terminal,
+    then echoing is turned off and the terminal is set to CBREAK
+    (character at a time instead of line at a time) mode.  It
+    remains in this mode until some line-mode reading is requested
+    (e.g., READLIST).  The Unix operating system forgets about any
+    pending characters when it switches modes, so the first KEYP
+    invocation will always output FALSE.
+
+COD***/
+// CMD KEYP 0 0 0 b
+// CMD KEY? 0 0 0 b
+Value *Compiler::genKeyp(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    return cs.ret(generateCallExtern(stdKeyp));
+}
+
+/***DOC LINEP LINE?
+LINEP
+LINE?
+
+	predicate, outputs TRUE if there is a line waiting to be
+	read from the read stream.  If the read stream is a file, this
+	is equivalent to NOT EOFP.  If the read stream is the terminal,
+	then typed characters will be displayed and may be edited until
+	the return key is pressed.
+
+COD***/
+// CMD LINEP 0 0 0 b
+// CMD LINE? 0 0 0 b
+Value *Compiler::genLinep(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    return cs.ret(generateCallExtern(stdLinep));
+}
+
+/***DOC CLEARTEXT CT
+CLEARTEXT
+CT
+
+    command.  Clears the text window.
+
+COD***/
+// CMD CLEARTEXT 0 0 0 n
+// CMD CT 0 0 0 n
+Value *Compiler::genCleartext(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    generateCallExtern(stdClearText);
+    return cs.ret(generateVoidRetval(node));
+}
+
+/***DOC SETCURSOR
+SETCURSOR vector
+
+    command.  The input is a list of two nonnegative integers, the
+    column and row coordinates of a text window position (origin in
+    the upper left corner, positive direction is southeast).  The text
+    cursor is moved to the requested position.  In the GUI the text
+    console may scroll to reveal the requested position if it was
+    previously outside of the viewing area. For example,
+    
+        ? setcursor [0 0]
+    
+    Will move the cursor to the very first line of the console window,
+    scrolling up to reveal it, if necessary. This command also forces the
+    immediate printing of any buffered characters.
+
+COD***/
+// CMD SETCURSOR 1 1 1 n
+Value *Compiler::genSetcursor(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeDatum);
+    // Nonnegative exact integers in signed i32 (INT_MAX is exact in double).
+    // Checked with the list so setcursor [1.5 0] is one ERRACT trip on the vector.
+    AllocaInst *posAry = generateNumberAryFromDatum(node.astnodeValue(), cs.child(0), 2, [this](Value *n) {
+        return generateIsExactIntegerInRange(n, 0.0, 2147483647.0);
+    });
+    Value *colPtr = gepAllocaElem(posAry, 0, DBG_NAME("colPtr"));
+    Value *rowPtr = gepAllocaElem(posAry, 1, DBG_NAME("rowPtr"));
+    Value *colD = scaff_->builder_.CreateLoad(TyDouble, colPtr, DBG_NAME("col"));
+    Value *rowD = scaff_->builder_.CreateLoad(TyDouble, rowPtr, DBG_NAME("row"));
+    Value *col = scaff_->builder_.CreateFPToSI(colD, TyInt32, DBG_NAME("colI"));
+    Value *row = scaff_->builder_.CreateFPToSI(rowD, TyInt32, DBG_NAME("rowI"));
+    endAllocaLifetime(posAry);
+    generateCallExtern(stdSetCursor, PaInt32(row), PaInt32(col));
+    return cs.ret(generateVoidRetval(node));
+}
+
+/***DOC CURSOR
+CURSOR
+
+    outputs a list containing the current column and row coordinates of
+    the text cursor.
+
+COD***/
+// CMD CURSOR 0 0 0 d
+Value *Compiler::genCursor(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    return cs.ret(generateCallExtern(stdCursor, PaAddr(scaff_->evaluator_)));
+}
+
+/***DOC SETMARGINS
+SETMARGINS vector
+
+    command. In UCBLogo this changes the margins of the text window.  QLogo
+    accepts the command for compatibility and does nothing.
+
+COD***/
+// CMD SETMARGINS 1 1 1 n
+Value *Compiler::genSetmargins(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeDatum);
+    return cs.ret(generateVoidRetval(node));
+}
+
+/***DOC SETTEXTCOLOR SETTC
+SETTEXTCOLOR foreground background
+SETTC foreground background
+(SETTEXTCOLOR foreground)
+(SETTC foreground)
+
+    command (GUI and TUI only). The inputs are colors. The foreground color
+    will be used as the text color for future printing to the text window.
+    The text already printed will not be affected. If a background color is
+    specified, it will immediately change the background color of all
+    text already on the screen.
+
+    Note that this is different from UCBLogo's SETTEXTCOLOR, which changes
+    the foreground and background colors of all text already on the screen
+    in addition to the future printing.
+
+COD***/
+// CMD SETTEXTCOLOR 1 2 2 n
+// CMD SETTC 1 2 2 n
+Value *Compiler::genSettextcolor(const DatumPtr &node, TypeMask expected)
+{
+
+    CallSite cs(this, node, TypeDatum);
+    const std::vector<Value *> &children = cs.children();
+    Value *foreground = children[0];
+    foreground = generateColorFromDatum(node.astnodeValue(), foreground);
+
+    const bool hasBackground = children.size() == 2;
+    Value *background = CoAddr(0);
+    if (hasBackground)
+        background = generateColorFromDatum(node.astnodeValue(), children[1]);
+
+    generateCallExtern(stdSetTextColor, PaAddr(foreground), PaAddr(background));
+    return cs.ret(generateVoidRetval(node));
+}
+
+/***DOC INCREASEFONT DECREASEFONT
+INCREASEFONT
+DECREASEFONT
+
+    command (GUI only). Increase or decrease the point size of the font
+    used in the text and edit windows by 2.  DECREASEFONT will not go
+    below 2.
+
+COD***/
+// CMD INCREASEFONT 0 0 0 n
+Value *Compiler::genIncreasefont(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    Value *size = generateCallExtern(stdTextSize);
+    size = scaff_->builder_.CreateFAdd(size, CoDouble(2.0), DBG_NAME("increasedSize"));
+    generateCallExtern(stdSetTextSize, PaDouble(size));
+    return cs.ret(generateVoidRetval(node));
+}
+
+// CMD DECREASEFONT 0 0 0 n
+Value *Compiler::genDecreasefont(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    Value *size = generateCallExtern(stdTextSize);
+    size = scaff_->builder_.CreateFSub(size, CoDouble(2.0), DBG_NAME("decreasedSize"));
+    Value *tooSmall = scaff_->builder_.CreateFCmpOLT(size, CoDouble(2.0), DBG_NAME("sizeLT2"));
+    size = scaff_->builder_.CreateSelect(tooSmall, CoDouble(2.0), size, DBG_NAME("clampedSize"));
+    generateCallExtern(stdSetTextSize, PaDouble(size));
+    return cs.ret(generateVoidRetval(node));
+}
+
+/***DOC SETTEXTSIZE
+SETTEXTSIZE height
+
+    command (GUI only). Set the "point size" of the font used in the
+    text and edit windows to the given number.  The size must be at
+    least 1.  See SETLABELHEIGHT for a different approach used for the
+    graphics window.
+
+COD***/
+// CMD SETTEXTSIZE 1 1 1 n
+Value *Compiler::genSettextsize(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeReal);
+    Value *size = cs.child(0);
+    size = generateValidationDouble(node.astnodeValue(), size, [this](Value *val) {
+        return scaff_->builder_.CreateFCmpOGE(val, CoDouble(1.0), DBG_NAME("sizeGE1"));
+    });
+    generateCallExtern(stdSetTextSize, PaDouble(size));
+    return cs.ret(generateVoidRetval(node));
+}
+
+/***DOC TEXTSIZE
+TEXTSIZE
+
+    outputs the "point size" of the font used in the text and edit
+    windows.  See SETTEXTSIZE for a discussion of font sizing.  See
+    LABELSIZE for a different approach used for the graphics window.
+
+COD***/
+// CMD TEXTSIZE 0 0 0 r
+Value *Compiler::genTextsize(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    return cs.ret(generateCallExtern(stdTextSize));
+}
+
+/***DOC SETFONT SETTEXTFONT
+SETFONT fontname
+SETTEXTFONT fontname
+
+    command (GUI only). Set the font family of the font used for all
+    future text and edit windows.  See ALLFONTS for a list of all fonts
+    available on your system.  Try "Courier or "Monospace as likely
+    possibilities.  Not all computers have the same fonts installed.
+    It's a good idea to stick with monospace fonts (ones in which all
+    characters have the same width).
+
+COD***/
+// CMD SETFONT 1 1 1 n
+// CMD SETTEXTFONT 1 1 1 n
+Value *Compiler::genSetfont(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeDatum);
+    Value *name = cs.child(0);
+    name = generateWordFromDatum(node.astnodeValue(), name);
+    generateCallExtern(stdSetFont, PaAddr(name));
+    return cs.ret(generateVoidRetval(node));
+}
+
+/***DOC FONT TEXTFONT
+FONT
+TEXTFONT
+
+    outputs the font family of the font used in the text and edit
+    windows.
+
+COD***/
+// CMD FONT 0 0 0 d
+// CMD TEXTFONT 0 0 0 d
+Value *Compiler::genFont(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    return cs.ret(generateCallExtern(stdFont, PaAddr(scaff_->evaluator_)));
+}
+
+/***DOC ALLFONTS
+ALLFONTS
+
+    outputs a list of all the font names available on your system. Note that
+    simply printing the list may not be the best representation since font
+    names usually contain spaces. You may instead wish to print each font
+    name on a separate line:
+
+        foreach allfonts [print ?]
+
+COD***/
+// CMD ALLFONTS 0 0 0 d
+Value *Compiler::genAllfonts(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeNothing);
+    return cs.ret(generateCallExtern(stdAllFonts, PaAddr(scaff_->evaluator_)));
+}
+
+/***DOC WAIT
+WAIT time
+
+    command.  Delays further execution for "time" 60ths of a second.
+    Also causes any buffered characters destined for the terminal to
+    be printed immediately.  WAIT 0 can be used to achieve this
+    buffer flushing without actually waiting.
+
+COD***/
+// CMD WAIT 1 1 1 n
+Value *Compiler::genWait(const DatumPtr &node, TypeMask expected)
+{
+    CallSite cs(this, node, TypeReal);
+    Value *time = cs.child(0);
+    time = generateNotNegativeFromDouble(node.astnodeValue(), time);
+    Value *retval = generateCallExtern(
+        stdWait, PaAddr(scaff_->evaluator_), PaAddr(CoAddr(node.astnodeValue())), PaDouble(time));
+    return cs.ret(generateNotFlowControl(retval));
+}
+
+/***DOC CLOSEALL
+CLOSEALL						(library procedure)
+
+	command.  Closes all open files.  Abbreviates
+	FOREACH ALLOPEN [CLOSE ?]
+
+COD***/
+
+/***LIB CLOSEALL
+;;; -*- logo -*-
+
+to closeall
+foreach allopen [close ?]
+end
+
+bury "closeall
+
+BIL***/
+
+/***DOC FILEP FILE?
+FILEP filename
+FILE? filename						(library procedure)
+
+	predicate, outputs TRUE if a file of the specified name exists
+	and can be read, FALSE otherwise.
+
+
+COD***/
+
+/***LIB FILEP
+;;; -*- logo -*-
+
+to filep :filename
+ignore error
+catch "error [openread :filename close :filename]
+output emptyp error
+end
+
+bury "filep
+
+BIL***/
+
+/***LIB FILE?
+;;; -*- logo -*-
+
+to file? :filename
+ignore error
+catch "error [openread :filename close :filename]
+output emptyp error
+end
+
+bury "file?
+
+BIL***/

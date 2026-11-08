@@ -8,7 +8,6 @@ and extract command metadata (name, arity, return types, method names).
 """
 
 import os
-import re
 import sys
 
 
@@ -109,7 +108,7 @@ def parse_source_file(source_path):
 def get_source_files(project_root):
     """Get sorted list of .cpp source files from the source directory."""
     source_dir = os.path.join(project_root, CPP_SOURCE_DIR)
-    sources = [f for f in os.listdir(source_dir) if re.match(r'.*\.cpp', f)]
+    sources = [f for f in os.listdir(source_dir) if f.endswith('.cpp')]
     sources.sort()
     return [os.path.join(source_dir, f) for f in sources]
 
@@ -147,8 +146,8 @@ def get_project_root():
 
 
 def string_to_enum(return_type_str):
-    """Return the CPP enum representation of the output_type string."""
-    retval = 'RequestReturn'
+    """Return the CPP TypeMask enum constant for the output_type string."""
+    retval = 'Type'
     s = return_type_str.upper()
     for c in 'RDBN':
         if c in s:

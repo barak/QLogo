@@ -25,14 +25,14 @@ class Console : public QTextEdit
     Q_OBJECT
 
   protected:
-    enum consoleMode_t
+    enum class consoleMode_t
     {
         consoleModeNoWait,
         consoleModeWaitingForChar,
         consoleModeWaitingForRawline,
     };
     consoleMode_t consoleMode_;
-    int beginningOfRawline;
+    int beginningOfRawline_;
     int beginningOfRawlineInBlock;
 
     // Line input history
@@ -47,18 +47,22 @@ class Console : public QTextEdit
     bool isPrintingStandout_ = false;
     void writeTextFragment(const QString &text);
     void standout();
+    void applyFont(const QFont &font);
 
     // Key press events
-    void keyPressEvent(QKeyEvent *event) Q_DECL_OVERRIDE;
+    void keyPressEvent(QKeyEvent *event) override;
     void processLineModeKeyPressEvent(QKeyEvent *event);
     void processCharModeKeyPressEvent(QKeyEvent *);
     void processNoWaitKeyPressEvent(QKeyEvent *event);
 
     void replaceLineWithHistoryIndex(int newIndex);
 
+    // Record line in history and send it to the interpreter.
+    void commitRawline(const QString &line);
+
     void insertNextLineFromQueue();
     void insertNextCharFromQueue();
-    void insertFromMimeData(const QMimeData *source) Q_DECL_OVERRIDE;
+    void insertFromMimeData(const QMimeData *source) override;
 
   public:
     /// @brief Constructor
@@ -79,10 +83,16 @@ class Console : public QTextEdit
     /// @brief Request a character from the user
     void requestChar();
 
+    /// @brief The cursor's row and column in the console grid.
+    struct CursorPosition
+    {
+        int row;
+        int col;
+    };
+
     /// @brief Get the cursor position
-    /// @param row The row of the cursor
-    /// @param col The column of the cursor
-    void getCursorPos(int &row, int &col);
+    /// @return The row and column of the cursor
+    CursorPosition getCursorPos() const;
 
     /// @brief Set the cursor position
     /// @param row The row of the cursor
@@ -104,7 +114,7 @@ class Console : public QTextEdit
 
     /// @brief Get the font
     /// @return The font
-    const QTextCharFormat getFont()
+    QTextCharFormat getFont()
     {
         return textFormat_;
     }

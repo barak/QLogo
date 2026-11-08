@@ -329,6 +329,354 @@ const QString &StringConstants::cmdStrTYPE()
     return str;
 }
 
+const QString &StringConstants::cmdStrREADLIST()
+{
+    static const QString str = QObject::tr("READLIST");
+    return str;
+}
+
+const QString &StringConstants::cmdStrRL()
+{
+    static const QString str = QObject::tr("RL");
+    return str;
+}
+
+const QString &StringConstants::cmdStrREADWORD()
+{
+    static const QString str = QObject::tr("READWORD");
+    return str;
+}
+
+const QString &StringConstants::cmdStrRW()
+{
+    static const QString str = QObject::tr("RW");
+    return str;
+}
+
+const QString &StringConstants::cmdStrREADRAWLINE()
+{
+    static const QString str = QObject::tr("READRAWLINE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrREADCHAR()
+{
+    static const QString str = QObject::tr("READCHAR");
+    return str;
+}
+
+const QString &StringConstants::cmdStrRC()
+{
+    static const QString str = QObject::tr("RC");
+    return str;
+}
+
+const QString &StringConstants::cmdStrREADCHARS()
+{
+    static const QString str = QObject::tr("READCHARS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrRCS()
+{
+    static const QString str = QObject::tr("RCS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrFILEDIALOG()
+{
+    static const QString str = QObject::tr("FILEDIALOG");
+    return str;
+}
+
+const QString &StringConstants::cmdStrCOPYRIGHT()
+{
+    static const QString str = QObject::tr("COPYRIGHT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSHOWIR()
+{
+    static const QString str = QObject::tr("SHOWIR");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSHOWCFG()
+{
+    static const QString str = QObject::tr("SHOWCFG");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSHOWMODULEIR()
+{
+    static const QString str = QObject::tr("SHOWMODULEIR");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSHELL()
+{
+    static const QString str = QObject::tr("SHELL");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETPREFIX()
+{
+    static const QString str = QObject::tr("SETPREFIX");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPREFIX()
+{
+    static const QString str = QObject::tr("PREFIX");
+    return str;
+}
+
+const QString &StringConstants::cmdStrOPENREAD()
+{
+    static const QString str = QObject::tr("OPENREAD");
+    return str;
+}
+
+const QString &StringConstants::cmdStrOPENWRITE()
+{
+    static const QString str = QObject::tr("OPENWRITE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrOPENAPPEND()
+{
+    static const QString str = QObject::tr("OPENAPPEND");
+    return str;
+}
+
+const QString &StringConstants::cmdStrOPENUPDATE()
+{
+    static const QString str = QObject::tr("OPENUPDATE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrCLOSE()
+{
+    static const QString str = QObject::tr("CLOSE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrALLOPEN()
+{
+    static const QString str = QObject::tr("ALLOPEN");
+    return str;
+}
+
+const QString &StringConstants::cmdStrERASEFILE()
+{
+    static const QString str = QObject::tr("ERASEFILE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrERF()
+{
+    static const QString str = QObject::tr("ERF");
+    return str;
+}
+
+const QString &StringConstants::cmdStrDRIBBLE()
+{
+    static const QString str = QObject::tr("DRIBBLE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrNODRIBBLE()
+{
+    static const QString str = QObject::tr("NODRIBBLE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETREAD()
+{
+    static const QString str = QObject::tr("SETREAD");
+    return str;
+}
+
+const QString &StringConstants::cmdStrREADER()
+{
+    static const QString str = QObject::tr("READER");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETWRITE()
+{
+    static const QString str = QObject::tr("SETWRITE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrWRITER()
+{
+    static const QString str = QObject::tr("WRITER");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETREADPOS()
+{
+    static const QString str = QObject::tr("SETREADPOS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrREADPOS()
+{
+    static const QString str = QObject::tr("READPOS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETWRITEPOS()
+{
+    static const QString str = QObject::tr("SETWRITEPOS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrWRITEPOS()
+{
+    static const QString str = QObject::tr("WRITEPOS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrEOFP()
+{
+    static const QString str = QObject::tr("EOFP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrEOF_Q()
+{
+    static const QString str = QObject::tr("EOF?");
+    return str;
+}
+
+const QString &StringConstants::cmdStrKEYP()
+{
+    static const QString str = QObject::tr("KEYP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrKEY_Q()
+{
+    static const QString str = QObject::tr("KEY?");
+    return str;
+}
+
+const QString &StringConstants::cmdStrLINEP()
+{
+    static const QString str = QObject::tr("LINEP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrLINE_Q()
+{
+    static const QString str = QObject::tr("LINE?");
+    return str;
+}
+
+const QString &StringConstants::cmdStrCLEARTEXT()
+{
+    static const QString str = QObject::tr("CLEARTEXT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrCT()
+{
+    static const QString str = QObject::tr("CT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETCURSOR()
+{
+    static const QString str = QObject::tr("SETCURSOR");
+    return str;
+}
+
+const QString &StringConstants::cmdStrCURSOR()
+{
+    static const QString str = QObject::tr("CURSOR");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETMARGINS()
+{
+    static const QString str = QObject::tr("SETMARGINS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETTEXTCOLOR()
+{
+    static const QString str = QObject::tr("SETTEXTCOLOR");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETTC()
+{
+    static const QString str = QObject::tr("SETTC");
+    return str;
+}
+
+const QString &StringConstants::cmdStrINCREASEFONT()
+{
+    static const QString str = QObject::tr("INCREASEFONT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrDECREASEFONT()
+{
+    static const QString str = QObject::tr("DECREASEFONT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETTEXTSIZE()
+{
+    static const QString str = QObject::tr("SETTEXTSIZE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrTEXTSIZE()
+{
+    static const QString str = QObject::tr("TEXTSIZE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETFONT()
+{
+    static const QString str = QObject::tr("SETFONT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETTEXTFONT()
+{
+    static const QString str = QObject::tr("SETTEXTFONT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrFONT()
+{
+    static const QString str = QObject::tr("FONT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrTEXTFONT()
+{
+    static const QString str = QObject::tr("TEXTFONT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrALLFONTS()
+{
+    static const QString str = QObject::tr("ALLFONTS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrWAIT()
+{
+    static const QString str = QObject::tr("WAIT");
+    return str;
+}
+
 const QString &StringConstants::cmdStrIF()
 {
     static const QString str = QObject::tr("IF");
@@ -344,6 +692,12 @@ const QString &StringConstants::cmdStrIFELSE()
 const QString &StringConstants::cmdStrRUN()
 {
     static const QString str = QObject::tr("RUN");
+    return str;
+}
+
+const QString &StringConstants::cmdStrRUNTIME()
+{
+    static const QString str = QObject::tr("RUNTIME");
     return str;
 }
 
@@ -443,6 +797,12 @@ const QString &StringConstants::cmdStrRUNRESULT()
     return str;
 }
 
+const QString &StringConstants::cmdStrMARK()
+{
+    static const QString str = QObject::tr("MARK");
+    return str;
+}
+
 const QString &StringConstants::cmdStrFOREVER()
 {
     static const QString str = QObject::tr("FOREVER");
@@ -476,6 +836,18 @@ const QString &StringConstants::cmdStrIFFALSE()
 const QString &StringConstants::cmdStrIFF()
 {
     static const QString str = QObject::tr("IFF");
+    return str;
+}
+
+const QString &StringConstants::cmdStrAPPLY()
+{
+    static const QString str = QObject::tr("APPLY");
+    return str;
+}
+
+const QString &StringConstants::cmdStr_Q()
+{
+    static const QString str = QObject::tr("?");
     return str;
 }
 
@@ -578,6 +950,24 @@ const QString &StringConstants::cmdStrBUTFIRST()
 const QString &StringConstants::cmdStrBF()
 {
     static const QString str = QObject::tr("BF");
+    return str;
+}
+
+const QString &StringConstants::cmdStrFIRSTS()
+{
+    static const QString str = QObject::tr("FIRSTS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrBUTFIRSTS()
+{
+    static const QString str = QObject::tr("BUTFIRSTS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrBFS()
+{
+    static const QString str = QObject::tr("BFS");
     return str;
 }
 
@@ -995,6 +1385,12 @@ const QString &StringConstants::cmdStrFILLED()
     return str;
 }
 
+const QString &StringConstants::cmdStrFILL()
+{
+    static const QString str = QObject::tr("FILL");
+    return str;
+}
+
 const QString &StringConstants::cmdStrLABEL()
 {
     static const QString str = QObject::tr("LABEL");
@@ -1004,6 +1400,12 @@ const QString &StringConstants::cmdStrLABEL()
 const QString &StringConstants::cmdStrSETLABELHEIGHT()
 {
     static const QString str = QObject::tr("SETLABELHEIGHT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETLABELFONT()
+{
+    static const QString str = QObject::tr("SETLABELFONT");
     return str;
 }
 
@@ -1049,6 +1451,18 @@ const QString &StringConstants::cmdStrSETSCRUNCH()
     return str;
 }
 
+const QString &StringConstants::cmdStrREFRESH()
+{
+    static const QString str = QObject::tr("REFRESH");
+    return str;
+}
+
+const QString &StringConstants::cmdStrNOREFRESH()
+{
+    static const QString str = QObject::tr("NOREFRESH");
+    return str;
+}
+
 const QString &StringConstants::cmdStrSHOWNP()
 {
     static const QString str = QObject::tr("SHOWNP");
@@ -1076,6 +1490,12 @@ const QString &StringConstants::cmdStrTURTLEMODE()
 const QString &StringConstants::cmdStrLABELSIZE()
 {
     static const QString str = QObject::tr("LABELSIZE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrLABELFONT()
+{
+    static const QString str = QObject::tr("LABELFONT");
     return str;
 }
 
@@ -1169,6 +1589,12 @@ const QString &StringConstants::cmdStrSETPENSIZE()
     return str;
 }
 
+const QString &StringConstants::cmdStrSETPENPATTERN()
+{
+    static const QString str = QObject::tr("SETPENPATTERN");
+    return str;
+}
+
 const QString &StringConstants::cmdStrSETBACKGROUND()
 {
     static const QString str = QObject::tr("SETBACKGROUND");
@@ -1223,6 +1649,12 @@ const QString &StringConstants::cmdStrPENSIZE()
     return str;
 }
 
+const QString &StringConstants::cmdStrPENPATTERN()
+{
+    static const QString str = QObject::tr("PENPATTERN");
+    return str;
+}
+
 const QString &StringConstants::cmdStrBACKGROUND()
 {
     static const QString str = QObject::tr("BACKGROUND");
@@ -1253,15 +1685,15 @@ const QString &StringConstants::cmdStrLOADPICT()
     return str;
 }
 
-const QString &StringConstants::cmdStrMOUSEPOS()
+const QString &StringConstants::cmdStrFMOUSEPOS()
 {
-    static const QString str = QObject::tr("MOUSEPOS");
+    static const QString str = QObject::tr("FMOUSEPOS");
     return str;
 }
 
-const QString &StringConstants::cmdStrCLICKPOS()
+const QString &StringConstants::cmdStrFCLICKPOS()
 {
-    static const QString str = QObject::tr("CLICKPOS");
+    static const QString str = QObject::tr("FCLICKPOS");
     return str;
 }
 
@@ -1295,14 +1727,428 @@ const QString &StringConstants::cmdStr_dot_MACRO()
     return str;
 }
 
+const QString &StringConstants::cmdStrDEFINE()
+{
+    static const QString str = QObject::tr("DEFINE");
+    return str;
+}
+
+const QString &StringConstants::cmdStr_dot_DEFMACRO()
+{
+    static const QString str = QObject::tr(".DEFMACRO");
+    return str;
+}
+
+const QString &StringConstants::cmdStrTEXT()
+{
+    static const QString str = QObject::tr("TEXT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrFULLTEXT()
+{
+    static const QString str = QObject::tr("FULLTEXT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrCOPYDEF()
+{
+    static const QString str = QObject::tr("COPYDEF");
+    return str;
+}
+
+const QString &StringConstants::cmdStrTHING()
+{
+    static const QString str = QObject::tr("THING");
+    return str;
+}
+
 const QString &StringConstants::cmdStrMAKE()
 {
     static const QString str = QObject::tr("MAKE");
     return str;
 }
 
+const QString &StringConstants::cmdStrLOCALMAKE()
+{
+    static const QString str = QObject::tr("LOCALMAKE");
+    return str;
+}
+
 const QString &StringConstants::cmdStrLOCAL()
 {
     static const QString str = QObject::tr("LOCAL");
+    return str;
+}
+
+const QString &StringConstants::cmdStrGLOBAL()
+{
+    static const QString str = QObject::tr("GLOBAL");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPPROP()
+{
+    static const QString str = QObject::tr("PPROP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrGPROP()
+{
+    static const QString str = QObject::tr("GPROP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrREMPROP()
+{
+    static const QString str = QObject::tr("REMPROP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPLIST()
+{
+    static const QString str = QObject::tr("PLIST");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPROCEDUREP()
+{
+    static const QString str = QObject::tr("PROCEDUREP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPROCEDURE_Q()
+{
+    static const QString str = QObject::tr("PROCEDURE?");
+    return str;
+}
+
+const QString &StringConstants::cmdStrMACROP()
+{
+    static const QString str = QObject::tr("MACROP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrMACRO_Q()
+{
+    static const QString str = QObject::tr("MACRO?");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPRIMITIVEP()
+{
+    static const QString str = QObject::tr("PRIMITIVEP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPRIMITIVE_Q()
+{
+    static const QString str = QObject::tr("PRIMITIVE?");
+    return str;
+}
+
+const QString &StringConstants::cmdStrDEFINEDP()
+{
+    static const QString str = QObject::tr("DEFINEDP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrDEFINED_Q()
+{
+    static const QString str = QObject::tr("DEFINED?");
+    return str;
+}
+
+const QString &StringConstants::cmdStrNAMEP()
+{
+    static const QString str = QObject::tr("NAMEP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrNAME_Q()
+{
+    static const QString str = QObject::tr("NAME?");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPLISTP()
+{
+    static const QString str = QObject::tr("PLISTP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPLIST_Q()
+{
+    static const QString str = QObject::tr("PLIST?");
+    return str;
+}
+
+const QString &StringConstants::cmdStrARITY()
+{
+    static const QString str = QObject::tr("ARITY");
+    return str;
+}
+
+const QString &StringConstants::cmdStrBURY()
+{
+    static const QString str = QObject::tr("BURY");
+    return str;
+}
+
+const QString &StringConstants::cmdStrTRACE()
+{
+    static const QString str = QObject::tr("TRACE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSTEP()
+{
+    static const QString str = QObject::tr("STEP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrUNBURY()
+{
+    static const QString str = QObject::tr("UNBURY");
+    return str;
+}
+
+const QString &StringConstants::cmdStrUNTRACE()
+{
+    static const QString str = QObject::tr("UNTRACE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrUNSTEP()
+{
+    static const QString str = QObject::tr("UNSTEP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrBURIED()
+{
+    static const QString str = QObject::tr("BURIED");
+    return str;
+}
+
+const QString &StringConstants::cmdStrTRACED()
+{
+    static const QString str = QObject::tr("TRACED");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSTEPPED()
+{
+    static const QString str = QObject::tr("STEPPED");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPROCEDURES()
+{
+    static const QString str = QObject::tr("PROCEDURES");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPRIMITIVES()
+{
+    static const QString str = QObject::tr("PRIMITIVES");
+    return str;
+}
+
+const QString &StringConstants::cmdStrNAMES()
+{
+    static const QString str = QObject::tr("NAMES");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPLISTS()
+{
+    static const QString str = QObject::tr("PLISTS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrCONTENTS()
+{
+    static const QString str = QObject::tr("CONTENTS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrNODES()
+{
+    static const QString str = QObject::tr("NODES");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPRINTOUT()
+{
+    static const QString str = QObject::tr("PRINTOUT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPO()
+{
+    static const QString str = QObject::tr("PO");
+    return str;
+}
+
+const QString &StringConstants::cmdStrPOT()
+{
+    static const QString str = QObject::tr("POT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrERASE()
+{
+    static const QString str = QObject::tr("ERASE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrER()
+{
+    static const QString str = QObject::tr("ER");
+    return str;
+}
+
+const QString &StringConstants::cmdStrERALL()
+{
+    static const QString str = QObject::tr("ERALL");
+    return str;
+}
+
+const QString &StringConstants::cmdStrERPS()
+{
+    static const QString str = QObject::tr("ERPS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrERNS()
+{
+    static const QString str = QObject::tr("ERNS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrERPLS()
+{
+    static const QString str = QObject::tr("ERPLS");
+    return str;
+}
+
+const QString &StringConstants::cmdStrBURIEDP()
+{
+    static const QString str = QObject::tr("BURIEDP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrBURIED_Q()
+{
+    static const QString str = QObject::tr("BURIED?");
+    return str;
+}
+
+const QString &StringConstants::cmdStrTRACEDP()
+{
+    static const QString str = QObject::tr("TRACEDP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrTRACED_Q()
+{
+    static const QString str = QObject::tr("TRACED?");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSTEPPEDP()
+{
+    static const QString str = QObject::tr("STEPPEDP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSTEPPED_Q()
+{
+    static const QString str = QObject::tr("STEPPED?");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSAVE()
+{
+    static const QString str = QObject::tr("SAVE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrLOAD()
+{
+    static const QString str = QObject::tr("LOAD");
+    return str;
+}
+
+const QString &StringConstants::cmdStrCSLSLOAD()
+{
+    static const QString str = QObject::tr("CSLSLOAD");
+    return str;
+}
+
+const QString &StringConstants::cmdStrHELP()
+{
+    static const QString str = QObject::tr("HELP");
+    return str;
+}
+
+const QString &StringConstants::cmdStrEDIT()
+{
+    static const QString str = QObject::tr("EDIT");
+    return str;
+}
+
+const QString &StringConstants::cmdStrED()
+{
+    static const QString str = QObject::tr("ED");
+    return str;
+}
+
+const QString &StringConstants::cmdStrEDITFILE()
+{
+    static const QString str = QObject::tr("EDITFILE");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETEDITOR()
+{
+    static const QString str = QObject::tr("SETEDITOR");
+    return str;
+}
+
+const QString &StringConstants::cmdStrEDITOR()
+{
+    static const QString str = QObject::tr("EDITOR");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETTEMPLOC()
+{
+    static const QString str = QObject::tr("SETTEMPLOC");
+    return str;
+}
+
+const QString &StringConstants::cmdStrTEMPLOC()
+{
+    static const QString str = QObject::tr("TEMPLOC");
+    return str;
+}
+
+const QString &StringConstants::cmdStrSETCSLSLOC()
+{
+    static const QString str = QObject::tr("SETCSLSLOC");
+    return str;
+}
+
+const QString &StringConstants::cmdStrGC()
+{
+    static const QString str = QObject::tr("GC");
+    return str;
+}
+
+const QString &StringConstants::cmdStr_dot_SETSEGMENTSIZE()
+{
+    static const QString str = QObject::tr(".SETSEGMENTSIZE");
     return str;
 }

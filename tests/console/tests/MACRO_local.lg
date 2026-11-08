@@ -1,0 +1,6 @@
+to try
+localmake "this 5
+print :this
+end
+try
+print :this

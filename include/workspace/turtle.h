@@ -14,8 +14,9 @@
 /// \file
 /// This file contains the declaration of the Turtle class, which maintains
 /// the turtle state. The turtle state includes the turtle's position,
-/// orientation, pen state, and visibility. The turtle's position is represented
-/// by the transformation matrix's translation part. The turtle's orientation
+/// orientation, pen state, and visibility. The turtle's display position is
+/// represented by the transformation matrix's translation part. Logical position
+/// (POS) is that translation divided by the X/Y scale. The turtle's orientation
 /// is represented by the transformation matrix's rotation part. The pen state
 /// is represented by the pen's color, size, and whether it is up or down. The
 /// turtle's visibility is represented by a boolean flag.
@@ -25,6 +26,8 @@
 #include "interface/logointerface.h"
 #include "sharedconstants.h"
 #include <QColor>
+#include <QList>
+#include <QPen>
 #include <QPointF>
 #include <QSizeF>
 #include <QTransform>
@@ -42,6 +45,11 @@ class Turtle
 
     double penSize_ = Config::get().initialPensize_;
 
+    Qt::PenStyle penStyle_ = Qt::SolidLine;
+    Qt::PenCapStyle penCapStyle_ = Qt::SquareCap;
+    Qt::PenJoinStyle penJoinStyle_ = Qt::BevelJoin;
+    QList<qreal> penDashPattern_;
+
     double scaleX_ = 1.0;
     double scaleY_ = 1.0;
 
@@ -50,17 +58,17 @@ class Turtle
     bool isFilling_ = false;
 
     double wrapTurtle(double lineStartU,
-                    double lineStartV,
-                    double lineEndU,
-                    double lineEndV,
-                    double boundU,
-                    double boundV,
-                    bool isXBoundary,
-                    double mult);
+                      double lineStartV,
+                      double lineEndU,
+                      double lineEndV,
+                      double boundU,
+                      double boundV,
+                      bool isXBoundary,
+                      double mult);
 
-    Datum* moveTurtle(const QTransform &newTransform);
+    Datum *moveTurtle(const QTransform &newTransform);
     void moveTurtleWrap(const QTransform &newTransform);
-    Datum* moveTurtleFence(const QTransform &newTransform);
+    Datum *moveTurtleFence(const QTransform &newTransform);
     void moveTurtleWindow(const QTransform &newTransform);
 
     /// @brief Private constructor for singleton pattern.
@@ -130,10 +138,10 @@ class Turtle
     /// @param angle The angle to rotate the turtle by.
     void rotate(double angle);
 
-    /// @brief Move the turtle forward by a given number of steps.
+    /// @brief Move the turtle forward by a given number of logical steps.
     /// @param steps The number of steps to move the turtle forward.
     /// @return nullptr if successful, otherwise an error.
-    Datum* forward(double steps);
+    Datum *forward(double steps);
 
     /// @brief Set the turtle mode.
     /// @param newMode The new turtle mode.
@@ -147,25 +155,25 @@ class Turtle
     /// @return The current turtle heading.
     double getHeading() const;
 
-    /// @brief Get the turtle position.
-    /// @return The x and y coordinates of the turtle.
+    /// @brief Get the turtle position in logical coordinates.
+    /// @return The x and y coordinates of the turtle (display translation / scale).
     QPointF getxy() const;
 
-    /// @brief Set the turtle position.
-    /// @param x The new x coordinate of the turtle.
-    /// @param y The new y coordinate of the turtle.
+    /// @brief Set the turtle position from logical coordinates.
+    /// @param x The new logical x coordinate of the turtle.
+    /// @param y The new logical y coordinate of the turtle.
     /// @return nullptr if successful, otherwise an error.
-    Datum* setxy(double x, double y);
+    Datum *setxy(double x, double y);
 
-    /// @brief Set the x coordinate of the turtle.
-    /// @param x The new x coordinate of the turtle.
+    /// @brief Set the logical x coordinate of the turtle.
+    /// @param x The new logical x coordinate of the turtle.
     /// @return nullptr if successful, otherwise an error.
-    Datum* setx(double x);
+    Datum *setx(double x);
 
-    /// @brief Set the y coordinate of the turtle.
-    /// @param y The new y coordinate of the turtle.
+    /// @brief Set the logical y coordinate of the turtle.
+    /// @param y The new logical y coordinate of the turtle.
     /// @return nullptr if successful, otherwise an error.
-    Datum* sety(double y);
+    Datum *sety(double y);
 
     /// @brief Set the pen color.
     /// @param c The new pen color.
@@ -174,6 +182,37 @@ class Turtle
     /// @brief Set the pen size.
     /// @param aPenSize The new pen size.
     void setPenSize(double aPenSize);
+
+    /// @brief Set the pen's line style, cap, join, and optional custom dash pattern.
+    /// @param style The Qt pen style.
+    /// @param cap The Qt pen cap style.
+    /// @param join The Qt pen join style.
+    /// @param dashPattern Dash lengths used only when style is Qt::CustomDashLine.
+    void setPenPattern(Qt::PenStyle style, Qt::PenCapStyle cap, Qt::PenJoinStyle join, const QList<qreal> &dashPattern);
+
+    /// @brief Get the pen's line style.
+    Qt::PenStyle penStyle() const
+    {
+        return penStyle_;
+    }
+
+    /// @brief Get the pen's cap style.
+    Qt::PenCapStyle penCapStyle() const
+    {
+        return penCapStyle_;
+    }
+
+    /// @brief Get the pen's join style.
+    Qt::PenJoinStyle penJoinStyle() const
+    {
+        return penJoinStyle_;
+    }
+
+    /// @brief Get the custom dash pattern. Empty unless the style is CustomDashLine.
+    const QList<qreal> &penDashPattern() const
+    {
+        return penDashPattern_;
+    }
 
     /// @brief Check if the pen size is valid.
     /// @param aPenSize The pen size to check.
@@ -192,12 +231,11 @@ class Turtle
     /// @return The X and Y scale factors (width and height).
     QSizeF getScale() const;
 
-    /// @brief Set the scale factors.
+    /// @brief Set the display-space scale factors (scrunch).
     /// @param newScaleX The new X scale factor.
     /// @param newScaleY The new Y scale factor.
-    /// @note The scaling is applied as a ratio relative to the current scale.
-    ///       For example, if the current X scale is 2.0 and newScaleX is 1.0,
-    ///       the transform will be scaled by 0.5 (1.0 / 2.0).
+    /// @note Zero and non-finite factors are ignored. Negative
+    ///       factors flip the corresponding axis.
     void setScale(double newScaleX, double newScaleY);
 
     /// @brief Move the turtle to the home position.
@@ -217,7 +255,8 @@ class Turtle
 
     /// @brief Begin filling with a given color.
     /// @param fillColor The color to fill with.
-    void beginFillWithColor(const QColor &fillColor);
+    /// @return nullptr if successful, otherwise an error (nested FILLED).
+    Datum *beginFillWithColor(const QColor &fillColor);
 
     /// @brief End filling.
     void endFill();

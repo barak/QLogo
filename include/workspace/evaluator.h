@@ -21,8 +21,21 @@
 #include "datum_ptr.h"
 
 #include <memory>
+#include <vector>
 
 class CallFrame;
+
+/// @brief How a procedure call decides whether its caller requires a value.
+/// @details The JIT passes this as an int. The numeric values are the ABI.
+enum class OutputRequired : int
+{
+    /// Command position. A missing value is acceptable.
+    AcceptNothing = 0,
+    /// The caller requires a value.
+    RequireValue = 1,
+    /// Tail of a line. Inherit the caller's requirement when this is the procedure's last line.
+    InheritIfLastLine = 2,
+};
 
 /// @brief The Evaluator object handles the evaluation of a list.
 ///
@@ -34,7 +47,15 @@ struct Evaluator
     CallFrame *owningFrame_;
 
     /// @brief The list to evaluate.
+    /// @note May be replaced by ece_chainList when a tail RUN continues in place.
     DatumPtr list_;
+
+    /// @brief The list this evaluator was created for.
+    /// @note Unchanged across list chaining; used to advance the procedure body line on pop.
+    DatumPtr startingList_;
+
+    /// @brief The list to run after the current list has completed.
+    DatumPtr listToRunAfterCurrentList_;
 
     /// @brief Ownership of this list's JIT module for the lifetime of the evaluation.
     /// @note Must outlive any suspended coroutine frame whose resume/destroy point into
@@ -48,15 +69,21 @@ struct Evaluator
     /// @brief The return value of this evaluation.
     Datum *retvalToParent_ = Datum::notADatum();
 
-    /// @brief Result of the most recently run sub-list (explicit control: push list, suspend, driver runs it, resume, pop).
-    /// Used by getLastEvaluationResult() after a coroutine suspend/resume for RUN/list call.
+    /// @brief Result of the most recently run sub-list (explicit control: push list, suspend, driver runs it, resume,
+    /// pop). Used by getLastEvaluationResult() after a coroutine suspend/resume for RUN/list call.
     DatumPtr retvalFromChild_;
 
-    /// @brief A pool of objects for garbage collection.
-    /// @note This is the reason the copy operators are deleted. If we enable them, the
-    ///  releasePool can be copied, and both copies will contain pointers to the same Datum objects.
-    ///  This will cause the Datum objects to be deleted twice.
-    std::vector<Datum *> releasePool_;
+    /// @brief TRACE indent when this evaluator was created.
+    /// @details Restored if the list finishes with an error or its coroutine is
+    /// abandoned, so stdTraceBegin without stdTraceEnd cannot leak indent.
+    int traceDepthAtEntry_ = 0;
+
+    /// @brief Temporary ownership of Datums created during this evaluation.
+    /// @note Compiled code cannot hold DatumPtrs, so watch() stores one here. When
+    ///  this Evaluator is destroyed, these DatumPtrs drop and any unreferenced Datum
+    ///  is deleted (including the MARK / alertOnDelete_ message). Copying Evaluator
+    ///  is still forbidden because of the coroutine handle and JIT module.
+    std::vector<DatumPtr> releasePool_;
 
     // The methods
 
@@ -76,28 +103,42 @@ struct Evaluator
     /// @param aList The list to push onto the evaluation stack.
     void pushSublist(Datum *aList);
 
+    /// @brief Abandon a suspended coroutine and evaluate @p aList in its place.
+    /// @param aList The list to evaluate instead of the suspended one.
+    /// @details Used when a tail-position macro returns instructions. The suspended call
+    /// is discarded and @p aList is compiled and run on this same evaluator.
+    void replaceRunningList(const DatumPtr &aList);
+
+    /// @brief Set the list to run after the current list has completed.
+    /// @param aList The list to run after the current list has completed.
+    /// @return Result for this evaluation: error/nothing on failure or empty list;
+    ///         nothing when a continuation was scheduled (chained list supplies the real result).
+    Datum *runListAfterCurrentList(Datum *aList);
+
     /// @brief Push the given procedure onto the evaluation stack and prepare it for execution.
     /// @param node The ASTNode of the procedure to push.
     /// @param paramAry The parameters to apply to the procedure.
     /// @param paramCount The number of parameters to apply.
-    void beginProcedure(ASTNode *node, Datum **paramAry, uint32_t paramCount);
+    /// @param outputRequired See OutputRequired.
+    void beginProcedure(ASTNode *node, Datum **paramAry, uint32_t paramCount, OutputRequired outputRequired);
 
-    /// @brief Add a Datum to the release pool
+    /// @brief Keep @p d alive until this evaluation ends.
     /// @return the given pointer (pass-through).
-    /// In other areas of code, memory management is handled by using the DatumPtr class.
-    /// Among other things, the DatumPtr acts like std::shared_ptr. As long as there exists at least one DatumPtr
-    /// pointing to a Datum, the Datum will not be deleted. In compiled code, we use the watch function to add a Datum
-    /// to the release pool. The release pool acts as an array of DatumPtrs. When the Evaluator is destroyed, it will
-    /// iterate through the release pool and decrement the retain count of each Datum that is not the return value.
-    ///  If any retain count reaches 0, the Datum will be deleted.
+    /// @details JIT code holds raw Datum addresses. watch() puts a DatumPtr in
+    ///  the release pool so the object lives for the rest of this Evaluator.
+    ///  The caller of popEvaluator copies retvalToParent_ into a DatumPtr first,
+    ///  so a returned value survives after the pool is dropped.
     Datum *watch(Datum *);
 
-    /// @brief Add a Datum to the release pool
+    /// @brief Keep @p d alive until this evaluation ends.
     /// @return the given pointer (pass-through).
     Datum *watch(const DatumPtr &);
 
     /// @brief Returns TRUE if CASEIGNOREDP is TRUE, otherwise FALSE.
     bool varCASEIGNOREDP();
+
+    /// @brief Returns TRUE if ALLOWGETSET is TRUE, otherwise FALSE.
+    bool varALLOWGETSET();
 
     Evaluator() = delete;
     Evaluator(const Evaluator &) = delete;

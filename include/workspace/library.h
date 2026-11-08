@@ -53,6 +53,9 @@ class DatabaseConnection
     void getConnection() const;
 
   public:
+    /// @brief Close the named Qt SQL connection while QCoreApplication is alive.
+    void closeConnection() const;
+
     virtual ~DatabaseConnection();
 
     DatabaseConnection(const DatabaseConnection &) = delete;
@@ -62,8 +65,10 @@ class DatabaseConnection
 /// @brief The Library class provides access to the QLogo standard library.
 class Library : public DatabaseConnection
 {
-    // Commented out because it is never populated. Restore it when we get it working again.
-    // QStringList allProcedures;
+    /// @brief Cached COMMAND keys from LIBRARY. Empty if the DB is missing or invalid.
+    /// @note Populated once; the table is read-only. Names are uppercase (Key form).
+    mutable QStringList allProcedures_;
+    mutable bool namesLoaded_ = false;
 
     bool validateSchema(const QStringList &tables) const override;
 
@@ -118,14 +123,25 @@ class Help : public DatabaseConnection
     /// @brief Destructor for the Help class.
     ~Help() override = default;
 
-    /// @brief Return a list of all command names that have a help text entry.
-    /// @return A list of all command names that have a help text entry.
-    QStringList allCommands();
+    /// @brief Return a list of command names for the given category.
+    /// @param category The help category to list commands for.
+    /// @return A list of command names in the given category.
+    QStringList commandsForCategory(const QString &category);
+
+    /// @brief Return a list of all help categories.
+    /// @return A list of all help categories.
+    QStringList allCategories();
 
     /// @brief Return the help text for a command.
     /// @param cmdName The name of the command to return the help text for.
     /// @return The help text for the command.
     QString helpText(const QString &cmdName);
 };
+
+/// @brief Set Config::cslsDirectory_ from the command line, CSLS, or defaults.
+/// @details Uses --setcslsloc if given, else the CSLS environment variable, else
+/// the CSLS directory next to the library and help databases (Linux
+/// share/qlogo/csls, macOS Resources/csls, Windows next to the binary).
+void initCslsDirectory();
 
 #endif // LIBRARY_H

@@ -1,9 +1,13 @@
 # Technically, the qlogo resource files belong to the qlogo binary,
-# but on MacOS I want to put them into the QLOGO_GUI bundle.
+# but on macOS they live in the GUI bundle's Contents/Resources so
+# findDBPath (../Resources/) can find them when qlogo runs from Psychi.
 set(RESOURCE_FILES
-  ${CMAKE_SOURCE_DIR}/share/qlogo_help.db
-  ${CMAKE_SOURCE_DIR}/share/qlogo_library.db
+  "${QLOGO_HELP_DB}"
+  "${QLOGO_LIB_DB}"
 )
+set_source_files_properties("${QLOGO_HELP_DB}" "${QLOGO_LIB_DB}" PROPERTIES GENERATED TRUE)
+set_source_files_properties(${QLOGO_CSLS_FILES} PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources/csls")
 set(GUI_SOURCES
   canvas.cpp
   console.cpp
@@ -24,21 +28,21 @@ set(GUI_SOURCES
 find_package(Qt6 REQUIRED COMPONENTS Sql)
 
 if(WIN32)
-    file(COPY "${CMAKE_SOURCE_DIR}/icons/${QLOGO_GUI}.ico"
-    DESTINATION  "${CMAKE_SOURCE_DIR}/resources")
-    set(app_icon_resource_windows "${CMAKE_SOURCE_DIR}/resources/${QLOGO_GUI}.rc")
+    set(app_icon_resource_windows "${CMAKE_SOURCE_DIR}/icons/windows/${QLOGO_GUI}.rc")
     qt_add_executable("${QLOGO_GUI}"
       ${GUI_SOURCES}
       ${app_icon_resource_windows}
     )
 elseif(APPLE)
     set(MACOSX_BUNDLE_ICON_FILE "${QLOGO_GUI}.icns")
-    set(app_icon_macos "${CMAKE_SOURCE_DIR}/icons/${QLOGO_GUI}.icns")
-    set_source_files_properties(${app_icon_macos} PROPERTIES
+    set(app_icon_macos "${CMAKE_SOURCE_DIR}/icons/macos/${QLOGO_GUI}.icns")
+    set_source_files_properties(${app_icon_macos} ${RESOURCE_FILES} PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources")
     qt_add_executable("${QLOGO_GUI}" MACOSX_BUNDLE
       ${GUI_SOURCES}
       ${app_icon_macos}
+      ${RESOURCE_FILES}
+      ${QLOGO_CSLS_FILES}
     )
 else()
     qt_add_executable("${QLOGO_GUI}"
@@ -55,6 +59,10 @@ target_link_libraries("${QLOGO_GUI}" PRIVATE
     Qt6::Svg
     Qt6::Sql
 )
+
+# qlogo opens the SQLite databases. Name the driver here so Qt's deploy tools
+# copy it into the Psychi bundle, where that qlogo binary can load it.
+qt_import_plugins("${QLOGO_GUI}" INCLUDE Qt6::QSQLiteDriverPlugin)
 
 if(APPLE)
   set_target_properties("${QLOGO_GUI}" PROPERTIES
@@ -81,12 +89,16 @@ if(WIN32)
   add_custom_command(TARGET "${QLOGO_GUI}" POST_BUILD
     COMMAND
       "${CMAKE_COMMAND}" -E env
-      "PATH=${_psychi_qt_bin_dir};$ENV{PATH}"
+      "PATH=${_psychi_qt_bin_dir};$ENV{SystemRoot}\\System32;$ENV{SystemRoot}"
       "${WINDEPLOYQT_EXECUTABLE}"
       "$<IF:$<CONFIG:Debug>,--debug,--release>"
       --no-translations
+      --include-plugins qsqlite
       "$<TARGET_FILE:${QLOGO_GUI}>"
-    COMMENT "Deploying Qt runtime for ${QLOGO_GUI}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+      "${QLOGO_CSLS_SRC}"
+      "$<TARGET_FILE_DIR:${QLOGO_GUI}>/csls"
+    COMMENT "Deploying Qt runtime and CSLS files for ${QLOGO_GUI}"
     VERBATIM
   )
 endif()

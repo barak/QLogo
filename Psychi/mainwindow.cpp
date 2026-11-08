@@ -22,527 +22,51 @@
 #include "ui_mainwindow.h"
 #include <QDebug>
 #include <QDir>
+#include <QEvent>
 #include <QFileDialog>
 #include <QFontDatabase>
+#include <QFontInfo>
+#include <QFontMetrics>
+#include <QGuiApplication>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QMessageBox>
-#include <QScrollBar>
-#include <QTextStream>
-#include <QThread>
+#include <QScreen>
+#include <QTextCursor>
 #include <QTimer>
-#include <iostream>
+#include <array>
+#include <limits>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
+
+// We use std::max later to generate a table of message handlers.
+#undef max
 #endif
-
-// External declaration of logging flag from psychi_main.cpp
-extern bool logging;
-
-/// @brief a pointer to the qlogo process.
-static QProcess *logoProcess;
-
-/// @brief Track if YAML header has been output
-static bool yamlHeaderOutput = false;
-
-/// @brief Output YAML header if not already output
-static void outputYamlHeaderIfNeeded()
-{
-    if (logging && !yamlHeaderOutput)
-    {
-        std::cout << "name: Generated Test\n";
-        std::cout << "description: Auto-generated test from logging output\n";
-        std::cout << "\n";
-        std::cout << "messages:\n";
-        yamlHeaderOutput = true;
-    }
-}
 
 QProcess *ProcessMessageWriter::process_ = nullptr;
 
-/// @brief Get the name of a message type for logging
-static QString getMessageTypeName(message_t type)
-{
-    switch (type)
-    {
-    case W_ZERO:
-        return "W_ZERO";
-    case W_INITIALIZE:
-        return "W_INITIALIZE";
-    case W_CLOSE_PIPE:
-        return "W_CLOSE_PIPE";
-    case W_SET_SCREENMODE:
-        return "W_SET_SCREENMODE";
-    case W_FILE_DIALOG_GET_PATH:
-        return "W_FILE_DIALOG_GET_PATH";
-    case S_SYSTEM:
-        return "S_SYSTEM";
-    case S_TOPLEVEL:
-        return "S_TOPLEVEL";
-    case S_PAUSE:
-        return "S_PAUSE";
-    case C_CONSOLE_PRINT_STRING:
-        return "C_CONSOLE_PRINT_STRING";
-    case C_CONSOLE_REQUEST_LINE:
-        return "C_CONSOLE_REQUEST_LINE";
-    case C_CONSOLE_REQUEST_CHAR:
-        return "C_CONSOLE_REQUEST_CHAR";
-    case C_CONSOLE_RAWLINE_READ:
-        return "C_CONSOLE_RAWLINE_READ";
-    case C_CONSOLE_CHAR_READ:
-        return "C_CONSOLE_CHAR_READ";
-    case C_CONSOLE_SET_FONT_NAME:
-        return "C_CONSOLE_SET_FONT_NAME";
-    case C_CONSOLE_SET_FONT_SIZE:
-        return "C_CONSOLE_SET_FONT_SIZE";
-    case C_CONSOLE_BEGIN_EDIT_TEXT:
-        return "C_CONSOLE_BEGIN_EDIT_TEXT";
-    case C_CONSOLE_END_EDIT_TEXT:
-        return "C_CONSOLE_END_EDIT_TEXT";
-    case C_CONSOLE_TEXT_CURSOR_POS:
-        return "C_CONSOLE_TEXT_CURSOR_POS";
-    case C_CONSOLE_SET_TEXT_CURSOR_POS:
-        return "C_CONSOLE_SET_TEXT_CURSOR_POS";
-    case C_CONSOLE_SET_CURSOR_MODE:
-        return "C_CONSOLE_SET_CURSOR_MODE";
-    case C_CONSOLE_SET_TEXT_COLOR:
-        return "C_CONSOLE_SET_TEXT_COLOR";
-    case C_CONSOLE_CLEAR_SCREEN_TEXT:
-        return "C_CONSOLE_CLEAR_SCREEN_TEXT";
-    case C_CANVAS_UPDATE_TURTLE_POS:
-        return "C_CANVAS_UPDATE_TURTLE_POS";
-    case C_CANVAS_EMIT_VERTEX:
-        return "C_CANVAS_EMIT_VERTEX";
-    case C_CANVAS_SET_FOREGROUND_COLOR:
-        return "C_CANVAS_SET_FOREGROUND_COLOR";
-    case C_CANVAS_SET_BACKGROUND_COLOR:
-        return "C_CANVAS_SET_BACKGROUND_COLOR";
-    case C_CANVAS_SET_BACKGROUND_IMAGE:
-        return "C_CANVAS_SET_BACKGROUND_IMAGE";
-    case C_CANVAS_BEGIN_POLYGON:
-        return "C_CANVAS_BEGIN_POLYGON";
-    case C_CANVAS_END_POLYGON:
-        return "C_CANVAS_END_POLYGON";
-    case C_CANVAS_SET_TURTLE_IS_VISIBLE:
-        return "C_CANVAS_SET_TURTLE_IS_VISIBLE";
-    case C_CANVAS_DRAW_LABEL:
-        return "C_CANVAS_DRAW_LABEL";
-    case C_CANVAS_DRAW_ARC:
-        return "C_CANVAS_DRAW_ARC";
-    case C_CANVAS_CLEAR_SCREEN:
-        return "C_CANVAS_CLEAR_SCREEN";
-    case C_CANVAS_SETBOUNDS:
-        return "C_CANVAS_SETBOUNDS";
-    case C_CANVAS_SET_IS_BOUNDED:
-        return "C_CANVAS_SET_IS_BOUNDED";
-    case C_CANVAS_SET_PENSIZE:
-        return "C_CANVAS_SET_PENSIZE";
-    case C_CANVAS_SET_PENUPDOWN:
-        return "C_CANVAS_SET_PENUPDOWN";
-    case C_CANVAS_SET_FONT_NAME:
-        return "C_CANVAS_SET_FONT_NAME";
-    case C_CANVAS_SET_FONT_SIZE:
-        return "C_CANVAS_SET_FONT_SIZE";
-    case C_CANVAS_GET_IMAGE:
-        return "C_CANVAS_GET_IMAGE";
-    case C_CANVAS_GET_SVG:
-        return "C_CANVAS_GET_SVG";
-    case C_CANVAS_MOUSE_BUTTON_DOWN:
-        return "C_CANVAS_MOUSE_BUTTON_DOWN";
-    case C_CANVAS_MOUSE_MOVED:
-        return "C_CANVAS_MOUSE_MOVED";
-    case C_CANVAS_MOUSE_BUTTON_UP:
-        return "C_CANVAS_MOUSE_BUTTON_UP";
-    case C_CANVAS_SET_PENMODE:
-        return "C_CANVAS_SET_PENMODE";
-    default:
-        return QString("UNKNOWN(%1)").arg(type);
-    }
-}
-
-/// @brief Escape a string for YAML output
-static QString yamlEscape(const QString &str)
-{
-    QString result;
-    result.reserve(str.length() + 10);
-    for (QChar c : str)
-    {
-        if (c == '\n')
-            result += "\\n";
-        else if (c == '\r')
-            result += "\\r";
-        else if (c == '\t')
-            result += "\\t";
-        else if (c == '"')
-            result += "\\\"";
-        else if (c == '\\')
-            result += "\\\\";
-        else if (c.unicode() < 32 || c.unicode() > 126)
-            result += QString("\\u%1").arg(static_cast<int>(c.unicode()), 4, 16, QChar('0'));
-        else
-            result += c;
-    }
-    return result;
-}
-
-/// @brief Serialize message data to YAML format
-static QString serializeMessageData(message_t type, const QByteArray &dataBuffer)
-{
-    QString result;
-    QTextStream yaml(&result);
-
-    bool hasData = false;
-    yaml << "      data:";
-
-    // If buffer is empty, output null
-    if (dataBuffer.isEmpty())
-    {
-        yaml << " null\n";
-        return result;
-    }
-
-    QDataStream readStream(dataBuffer);
-
-    switch (type)
-    {
-    // W_INITIALIZE is handled outside of script, so not logged
-    case W_SET_SCREENMODE:
-    {
-        ScreenModeEnum mode;
-        readStream >> mode;
-        yaml << " " << (int)mode << "\n";
-        hasData = true;
-        break;
-    }
-    case W_FILE_DIALOG_GET_PATH:
-    {
-        QString path;
-        readStream >> path;
-        yaml << " \"" << yamlEscape(path) << "\"\n";
-        hasData = true;
-        break;
-    }
-    case C_CONSOLE_PRINT_STRING:
-    {
-        QString text;
-        readStream >> text;
-        yaml << " \"" << yamlEscape(text) << "\"\n";
-        hasData = true;
-        break;
-    }
-    case C_CONSOLE_SET_FONT_NAME:
-    {
-        QString name;
-        readStream >> name;
-        yaml << " \"" << yamlEscape(name) << "\"\n";
-        hasData = true;
-        break;
-    }
-    case C_CONSOLE_SET_FONT_SIZE:
-    {
-        qreal size;
-        readStream >> size;
-        yaml << " " << size << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CONSOLE_REQUEST_LINE:
-    {
-        QString prompt;
-        readStream >> prompt;
-        yaml << "\n";
-        yaml << "        prompt: \"" << yamlEscape(prompt) << "\"\n";
-        hasData = true;
-        break;
-    }
-    case C_CONSOLE_BEGIN_EDIT_TEXT:
-    {
-        QString text;
-        readStream >> text;
-        yaml << " \"" << yamlEscape(text) << "\"\n";
-        hasData = true;
-        break;
-    }
-    case C_CONSOLE_END_EDIT_TEXT:
-    {
-        QString text;
-        readStream >> text;
-        yaml << " \"" << yamlEscape(text) << "\"\n";
-        hasData = true;
-        break;
-    }
-    case C_CONSOLE_TEXT_CURSOR_POS:
-    {
-        int row, col;
-        readStream >> row >> col;
-        yaml << "\n";
-        yaml << "        row: " << row << "\n";
-        yaml << "        col: " << col << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CONSOLE_SET_TEXT_CURSOR_POS:
-    {
-        int row, col;
-        readStream >> row >> col;
-        yaml << "\n";
-        yaml << "        - " << row << "\n";
-        yaml << "        - " << col << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CONSOLE_SET_CURSOR_MODE:
-    {
-        bool mode;
-        readStream >> mode;
-        yaml << " " << (mode ? "true" : "false") << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CONSOLE_SET_TEXT_COLOR:
-    {
-        QColor foreground, background;
-        readStream >> foreground >> background;
-        yaml << "\n";
-        yaml << "        foreground:\n";
-        yaml << "          r: " << foreground.red() << "\n";
-        yaml << "          g: " << foreground.green() << "\n";
-        yaml << "          b: " << foreground.blue() << "\n";
-        yaml << "          a: " << foreground.alpha() << "\n";
-        yaml << "        background:\n";
-        yaml << "          r: " << background.red() << "\n";
-        yaml << "          g: " << background.green() << "\n";
-        yaml << "          b: " << background.blue() << "\n";
-        yaml << "          a: " << background.alpha() << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CONSOLE_RAWLINE_READ:
-    {
-        QString line;
-        readStream >> line;
-        yaml << " \"" << yamlEscape(line) << "\"\n";
-        hasData = true;
-        break;
-    }
-    case C_CONSOLE_CHAR_READ:
-    {
-        QChar c;
-        readStream >> c;
-        yaml << " \"" << yamlEscape(QString(c)) << "\"\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_UPDATE_TURTLE_POS:
-    {
-        QTransform matrix;
-        readStream >> matrix;
-        // Transform is complex, just output a placeholder
-        yaml << " <QTransform>\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_SET_TURTLE_IS_VISIBLE:
-    {
-        bool visible;
-        readStream >> visible;
-        yaml << " " << (visible ? "true" : "false") << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_SET_FOREGROUND_COLOR:
-    case C_CANVAS_SET_BACKGROUND_COLOR:
-    case C_CANVAS_BEGIN_POLYGON:
-    {
-        QColor color;
-        readStream >> color;
-        yaml << "\n";
-        yaml << "        r: " << color.red() << "\n";
-        yaml << "        g: " << color.green() << "\n";
-        yaml << "        b: " << color.blue() << "\n";
-        yaml << "        a: " << color.alpha() << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_SET_BACKGROUND_IMAGE:
-    {
-        QImage image;
-        readStream >> image;
-        yaml << " <QImage>\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_SETBOUNDS:
-    {
-        qreal x, y;
-        readStream >> x >> y;
-        yaml << "\n";
-        yaml << "        - " << x << "\n";
-        yaml << "        - " << y << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_SET_IS_BOUNDED:
-    {
-        bool bounded;
-        readStream >> bounded;
-        yaml << " " << (bounded ? "true" : "false") << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_SET_FONT_NAME:
-    {
-        QString name;
-        readStream >> name;
-        yaml << " \"" << yamlEscape(name) << "\"\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_SET_FONT_SIZE:
-    {
-        qreal size;
-        readStream >> size;
-        yaml << " " << size << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_DRAW_LABEL:
-    {
-        QString label;
-        readStream >> label;
-        yaml << " \"" << yamlEscape(label) << "\"\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_DRAW_ARC:
-    {
-        qreal angle, radius;
-        readStream >> angle >> radius;
-        yaml << "\n";
-        yaml << "        - " << angle << "\n";
-        yaml << "        - " << radius << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_SET_PENSIZE:
-    {
-        qreal size;
-        readStream >> size;
-        yaml << " " << size << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_SET_PENUPDOWN:
-    {
-        bool down;
-        readStream >> down;
-        yaml << " " << (down ? "true" : "false") << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_SET_PENMODE:
-    {
-        PenModeEnum mode;
-        readStream >> mode;
-        yaml << " " << (int)mode << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_GET_IMAGE:
-    {
-        QImage image;
-        readStream >> image;
-        yaml << " <QImage>\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_GET_SVG:
-    {
-        QByteArray svg;
-        readStream >> svg;
-        yaml << " <QByteArray>\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_MOUSE_BUTTON_DOWN:
-    {
-        QPointF point;
-        int button;
-        readStream >> point >> button;
-        yaml << "\n";
-        yaml << "        point:\n";
-        yaml << "          x: " << point.x() << "\n";
-        yaml << "          y: " << point.y() << "\n";
-        yaml << "        button: " << button << "\n";
-        hasData = true;
-        break;
-    }
-    case C_CANVAS_MOUSE_MOVED:
-    {
-        QPointF point;
-        readStream >> point;
-        yaml << "\n";
-        yaml << "        x: " << point.x() << "\n";
-        yaml << "        y: " << point.y() << "\n";
-        hasData = true;
-        break;
-    }
-    default:
-        // No data or unknown message type
-        break;
-    }
-
-    if (!hasData)
-    {
-        yaml << " null\n";
-    }
-
-    return result;
-}
-
 qint64 ProcessMessageWriter::write(const QByteArray &buffer)
 {
-    if (logging)
-    {
-        // Extract message type and data from buffer
-        // Buffer format: [length (8 bytes)][header (1 byte)][data...]
-        if (buffer.size() >= static_cast<int>(sizeof(qint64) + sizeof(message_t)))
-        {
-            QByteArray messageData = buffer.mid(sizeof(qint64)); // Skip length prefix
-            QDataStream stream(messageData);
-            message_t header;
-            stream >> header;
-
-            // Skip W_INITIALIZE messages (handled outside of script)
-            if (header != W_INITIALIZE)
-            {
-                outputYamlHeaderIfNeeded();
-
-                // Extract data portion (after header)
-                QByteArray dataPortion = messageData.mid(sizeof(message_t));
-
-                QString msgTypeName = getMessageTypeName(header);
-
-                std::cout << "  - send:\n";
-                std::cout << "      message: " << msgTypeName.toStdString() << "\n";
-
-                // Serialize the data
-                QString yamlData = serializeMessageData(header, dataPortion);
-                std::cout << yamlData.toStdString();
-            }
-        }
-    }
-
     return process_->write(buffer);
 }
 
-#define message(X) (MessageTemplate<ProcessMessageWriter>(X))
-
-MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui_(new Ui::MainWindow)
+template <typename... Args>
+void sendMessage(message_t header, const Args &...args)
 {
+    MessageTemplate<ProcessMessageWriter> msg(header);
+    (void)(msg << ... << args);
+}
+
+MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui_(std::make_unique<Ui::MainWindow>())
+{
+    ProcessMessageWriter::process_ = &logoProcess_;
     ui_->setupUi(this);
 
-    windowMode_ = windowMode_noWait;
+    windowMode_ = windowMode_t::windowMode_noWait;
+
+    ui_->mainConsole->installEventFilter(this);
+    ui_->mainCanvas->installEventFilter(this);
 }
 
 void MainWindow::show()
@@ -553,10 +77,7 @@ void MainWindow::show()
     startLogo();
 }
 
-MainWindow::~MainWindow()
-{
-    delete ui_;
-}
+MainWindow::~MainWindow() = default;
 
 QString MainWindow::findQlogoExe()
 {
@@ -593,22 +114,19 @@ int MainWindow::startLogo()
     QStringList arguments;
     arguments << "--Psychi";
 
-    logoProcess = new QProcess(this);
-    ProcessMessageWriter::process_ = logoProcess;
-
 #ifdef Q_OS_WIN
-    logoProcess->setCreateProcessArgumentsModifier(
-        [](QProcess::CreateProcessArguments *args) {
-            args->flags |= CREATE_NO_WINDOW;
-        });
+    logoProcess_.setCreateProcessArgumentsModifier(
+        [](QProcess::CreateProcessArguments *args) { args->flags |= CREATE_NO_WINDOW; });
 #endif
 
-    connect(
-        logoProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, &MainWindow::processFinished);
+    connect(&logoProcess_,
+            QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this,
+            &MainWindow::processFinished);
 
-    connect(logoProcess, &QProcess::readyReadStandardOutput, this, &MainWindow::readStandardOutput);
+    connect(&logoProcess_, &QProcess::readyReadStandardOutput, this, &MainWindow::readStandardOutput);
 
-    connect(logoProcess, &QProcess::readyReadStandardError, this, &MainWindow::readStandardError);
+    connect(&logoProcess_, &QProcess::readyReadStandardError, this, &MainWindow::readStandardError);
 
     connect(ui_->mainConsole, &Console::sendRawlineSignal, this, &MainWindow::sendRawlineSlot);
 
@@ -622,26 +140,20 @@ int MainWindow::startLogo()
 
     connect(ui_->mainCanvas, &Canvas::sendMouseReleasedSignal, this, &MainWindow::mousereleasedSlot);
 
-    logoProcess->start(command, arguments);
+    logoProcess_.start(command, arguments);
     return 0;
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    qint64 pid = logoProcess->processId();
+    qint64 pid = logoProcess_.processId();
     // Tell the process to die, then ignore.
     // Because when the process dies another signal will be sent to close the application.
     if (pid > 0)
     {
-        message(S_SYSTEM);
+        sendMessage(S_SYSTEM);
 
-        if (logging)
-        {
-            outputYamlHeaderIfNeeded();
-            std::cout << "  - close_write_pipe: {}\n";
-        }
-
-        logoProcess->closeWriteChannel();
+        logoProcess_.closeWriteChannel();
 
         event->ignore();
     }
@@ -651,44 +163,226 @@ void MainWindow::closeEvent(QCloseEvent *event)
     }
 }
 
+namespace
+{
+bool isPhysicalControlHeld(const QKeyEvent *event)
+{
+    const Qt::KeyboardModifiers mods =
+        event->modifiers() & (Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
+#ifdef Q_OS_MACOS
+    // Qt maps ControlModifier to Command on macOS. The physical Control key is Meta.
+    return mods == Qt::MetaModifier;
+#else
+    return mods == Qt::ControlModifier;
+#endif
+}
+
+message_t interruptKindForKey(const QKeyEvent *keyEvent, bool copyHasSelection)
+{
+#ifdef Q_OS_MACOS
+    Q_UNUSED(copyHasSelection);
+#endif
+    if (keyEvent->matches(QKeySequence::Quit))
+        return S_SYSTEM;
+#ifndef Q_OS_MACOS
+    if (isPhysicalControlHeld(keyEvent) && (keyEvent->key() == Qt::Key_Q || keyEvent->key() == Qt::Key_Backslash))
+        return S_SYSTEM;
+#endif
+    if (isPhysicalControlHeld(keyEvent) && keyEvent->key() == Qt::Key_Z)
+        return S_PAUSE;
+    if (isPhysicalControlHeld(keyEvent) && keyEvent->key() == Qt::Key_C)
+    {
+#ifndef Q_OS_MACOS
+        if (copyHasSelection && keyEvent->matches(QKeySequence::Copy))
+            return W_ZERO;
+#endif
+        return S_TOPLEVEL;
+    }
+    return W_ZERO;
+}
+} // namespace
+
+bool MainWindow::maybeSendInterrupt(QKeyEvent *keyEvent)
+{
+    if (logoProcess_.processId() <= 0)
+        return false;
+
+    const bool copyHasSelection = ui_->mainConsole->textCursor().hasSelection();
+    const message_t kind = interruptKindForKey(keyEvent, copyHasSelection);
+    if (kind == W_ZERO)
+        return false;
+
+    sendMessage(kind);
+    return true;
+}
+
+bool MainWindow::maybeSendKeyEvent(QKeyEvent *keyEvent)
+{
+    if (windowMode_ != windowMode_t::windowMode_noWait)
+        return false;
+    if (logoProcess_.processId() <= 0)
+        return false;
+    const QString text = keyEvent->text();
+    if (text.isEmpty())
+        return false;
+    for (QChar c : text)
+    {
+        if (c.isNull())
+            continue;
+        sendMessage(C_CONSOLE_KEY_EVENT, c);
+    }
+    return true;
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    Q_UNUSED(watched);
+    if (event->type() != QEvent::ShortcutOverride && event->type() != QEvent::KeyPress)
+        return QMainWindow::eventFilter(watched, event);
+
+    auto *keyEvent = static_cast<QKeyEvent *>(event);
+    const bool copyHasSelection = ui_->mainConsole->textCursor().hasSelection();
+    if (interruptKindForKey(keyEvent, copyHasSelection) != W_ZERO)
+    {
+        if (event->type() == QEvent::ShortcutOverride)
+        {
+            event->accept();
+            // Cmd-Q is an application shortcut; send here in case no KeyPress follows.
+            if (keyEvent->matches(QKeySequence::Quit))
+                maybeSendInterrupt(keyEvent);
+            return true;
+        }
+
+        if (!keyEvent->matches(QKeySequence::Quit))
+            maybeSendInterrupt(keyEvent);
+        return true;
+    }
+
+    if (event->type() == QEvent::KeyPress && maybeSendKeyEvent(keyEvent))
+        return true;
+
+    return QMainWindow::eventFilter(watched, event);
+}
+
+namespace
+{
+/// True when Latin letters and the space share one advance.
+///
+/// setFixedPitch() can give i and W the same width on a proportional face
+/// while the space stays narrow. That face is not monospace.
+bool fontIsMonospace(const QFont &font)
+{
+    const QFontMetrics metrics(font);
+    if (!metrics.inFont(u'i') || !metrics.inFont(u'W') || !metrics.inFont(u' '))
+        return false;
+    const int width = metrics.horizontalAdvance(u'i');
+    return width > 0 && width == metrics.horizontalAdvance(u'W') && width == metrics.horizontalAdvance(u'M') &&
+           width == metrics.horizontalAdvance(u' ');
+}
+
+QFont withMonospaceHint(QFont font)
+{
+    font.setStyleHint(QFont::Monospace);
+    font.setFixedPitch(true);
+    return font;
+}
+} // namespace
+
+QFont MainWindow::defaultFont()
+{
+    // Some platform themes name a proportional face as the fixed font.
+    // Keep it only when the space advance matches the letters.
+    QFont font = withMonospaceHint(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    if (!fontIsMonospace(font))
+        font = withMonospaceHint(QFont(QStringLiteral("monospace")));
+
+    if (!fontIsMonospace(font))
+    {
+        const QStringList families = QFontDatabase::families();
+        for (const QString &family : families)
+        {
+            QFont candidate = withMonospaceHint(QFont(family));
+            if (fontIsMonospace(candidate))
+            {
+                font = candidate;
+                break;
+            }
+        }
+    }
+
+    QFontInfo info(font);
+    if (!info.family().isEmpty())
+    {
+        QFont pinned = font;
+        pinned.setFamilies(QStringList(info.family()));
+        if (fontIsMonospace(pinned))
+            font = pinned;
+    }
+
+    info = QFontInfo(font);
+    qreal pointSize = info.pointSizeF();
+    if (pointSize <= 0)
+    {
+        const int pixels = info.pixelSize();
+        qreal dpi = 0;
+        if (const QScreen *screen = QGuiApplication::primaryScreen())
+            dpi = screen->logicalDotsPerInchY();
+        if (pixels > 0 && dpi > 0)
+            pointSize = pixels * 72.0 / dpi;
+    }
+    if (pointSize > 0)
+        font.setPointSizeF(pointSize);
+    return font;
+}
+
 void MainWindow::initialize()
 {
-    QFont defaultFont = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-    ui_->mainConsole->setTextFontSize(defaultFont.pointSizeF());
-    ui_->mainConsole->setTextFontName(defaultFont.family());
-    ui_->mainCanvas->setLabelFontSize(defaultFont.pointSizeF());
-    ui_->mainCanvas->setLabelFontName(defaultFont.family());
+    const QFont font = defaultFont();
+    const QFontInfo fontInfo(font);
     setSplitterforMode(initScreenMode);
 
-    message(W_INITIALIZE) << QFontDatabase::families() << defaultFont.family() << (double)defaultFont.pointSizeF();
+    sendMessage(W_INITIALIZE, QFontDatabase::families(), fontInfo.family(), static_cast<double>(font.pointSizeF()));
 }
 
 void MainWindow::fileDialogModal()
 {
     QString startingDir = QDir::homePath();
     QString filePath = QFileDialog::getOpenFileName(this, tr("Choose file"), startingDir);
-    message(W_FILE_DIALOG_GET_PATH) << filePath;
+    sendMessage(W_FILE_DIALOG_GET_PATH, filePath);
 }
 
-void MainWindow::openEditorWindow(const QString &startingText)
+void MainWindow::startWaitTimer(qint32 msecs)
+{
+    if (waitTimer_ == nullptr)
+    {
+        waitTimer_ = new QTimer(this);
+        waitTimer_->setSingleShot(true);
+        connect(waitTimer_, &QTimer::timeout, this, [this]() { sendMessage(W_TIMER_END); });
+    }
+    // Restarting cancels a timer left running after WAIT returned early for
+    // BUTTONACT/KEYACT.
+    waitTimer_->start(msecs);
+}
+
+void MainWindow::openEditorWindow(const QString &title, const QString &startingText)
 {
     if (editWindow_ == nullptr)
     {
-        editWindow_ = new EditorWindow;
+        editWindow_ = new EditorWindow(this);
 
-        connect(editWindow_, SIGNAL(editingHasEndedSignal(QString)), this, SLOT(editingHasEndedSlot(QString)));
+        connect(editWindow_, &EditorWindow::editingHasEndedSignal, this, &MainWindow::editingHasEndedSlot);
     }
 
+    editWindow_->setWindowTitle(title.isEmpty() ? tr("Editor") : title);
     editWindow_->setTextFormat(ui_->mainConsole->getFont());
     editWindow_->setContents(startingText);
     editWindow_->show();
     editWindow_->activateWindow();
-    editWindow_->setFocus();
 }
 
-void MainWindow::editingHasEndedSlot(const QString &text)
+void MainWindow::editingHasEndedSlot(bool accepted, const QString &text)
 {
-    message(C_CONSOLE_END_EDIT_TEXT) << text;
+    sendMessage(C_CONSOLE_END_EDIT_TEXT, accepted, text);
 }
 
 void MainWindow::introduceCanvas()
@@ -714,23 +408,23 @@ void MainWindow::readStandardOutput()
 {
     qint64 datalen;
 
-    forever
+    for (;;)
     {
         // If a message is complete then it was already sent,
         // and we can start a new one.
         if (readBuffer_.size() == readBufferLen_)
         {
-            int readResult = logoProcess->read(reinterpret_cast<char *>(&datalen), sizeof(qint64));
+            qint64 readResult = logoProcess_.read(reinterpret_cast<char *>(&datalen), sizeof(qint64));
             if (readResult != sizeof(qint64))
                 return;
             readBufferLen_ = datalen;
-            readBuffer_ = logoProcess->read(readBufferLen_);
+            readBuffer_ = logoProcess_.read(readBufferLen_);
         }
         else
         {
             // We are appending the incoming message to the buffer.
             qint64 remain = readBufferLen_ - readBuffer_.size();
-            QByteArray post = logoProcess->read(remain);
+            QByteArray post = logoProcess_.read(remain);
             Q_ASSERT(!post.isEmpty());
             readBuffer_.append(post);
         }
@@ -745,283 +439,348 @@ void MainWindow::readStandardOutput()
     }
 }
 
-void MainWindow::processReadBuffer()
+/// @brief Inbound pipe handlers, indexed by message_t.
+///
+/// Slots with no handler are messages Psychi sends, or codes it does not know.
+struct MessageDispatch
 {
-    QDataStream dataStream = QDataStream(readBuffer_);
-    message_t header;
+    using Handler = void (*)(MainWindow &window, QDataStream &stream);
 
-    dataStream >> header;
+    static constexpr std::size_t count = static_cast<std::size_t>(std::numeric_limits<message_t>::max()) + 1;
 
-    // Log received message if logging is enabled
-    if (logging)
+    static void zero(MainWindow &, QDataStream &)
     {
-        // Skip W_INITIALIZE messages (handled outside of script)
-        if (header != W_INITIALIZE)
-        {
-            outputYamlHeaderIfNeeded();
-
-            QString msgTypeName = getMessageTypeName(header);
-
-            std::cout << "  - expect:\n";
-            std::cout << "      message: " << msgTypeName.toStdString() << "\n";
-
-            // Extract data portion (after header, which is 1 byte)
-            QByteArray dataPortion = readBuffer_.mid(sizeof(message_t));
-
-            QString yamlData = serializeMessageData(header, dataPortion);
-            std::cout << yamlData.toStdString();
-        }
-    }
-
-    switch (header)
-    {
-    case W_ZERO:
         // This only exists to help catch errors.
         qInfo() << "Zero!";
-        break;
-    case W_INITIALIZE:
-    {
-        initialize();
-        break;
     }
-    case W_CLOSE_PIPE:
-    {
-        if (logging)
-        {
-            outputYamlHeaderIfNeeded();
-            std::cout << "  - close_write_pipe: {}\n";
-        }
 
-        logoProcess->closeWriteChannel();
-        break;
+    static void initialize(MainWindow &window, QDataStream &)
+    {
+        window.initialize();
     }
-    case W_SET_SCREENMODE:
+
+    static void closePipe(MainWindow &window, QDataStream &)
+    {
+        window.logoProcess_.closeWriteChannel();
+    }
+
+    static void setScreenMode(MainWindow &window, QDataStream &stream)
     {
         ScreenModeEnum newMode;
-        dataStream >> newMode;
-        setSplitterforMode(newMode);
-        break;
+        stream >> newMode;
+        window.setSplitterforMode(newMode);
     }
-    case W_FILE_DIALOG_GET_PATH:
+
+    static void fileDialog(MainWindow &window, QDataStream &)
     {
-        fileDialogModal();
-        break;
+        window.fileDialogModal();
     }
-    case C_CONSOLE_PRINT_STRING:
+
+    static void timerStart(MainWindow &window, QDataStream &stream)
+    {
+        qint32 msecs;
+        stream >> msecs;
+        window.startWaitTimer(msecs);
+    }
+
+    static void printString(MainWindow &window, QDataStream &stream)
     {
         QString text;
-        dataStream >> text;
-        ui_->mainConsole->printString(text);
-        break;
+        stream >> text;
+        window.ui_->mainConsole->printString(text);
     }
-    case C_CONSOLE_SET_FONT_NAME:
+
+    static void setConsoleFontName(MainWindow &window, QDataStream &stream)
     {
         QString name;
-        dataStream >> name;
-        ui_->mainConsole->setTextFontName(name);
-        break;
+        stream >> name;
+        window.ui_->mainConsole->setTextFontName(name);
     }
-    case C_CONSOLE_SET_FONT_SIZE:
+
+    static void setConsoleFontSize(MainWindow &window, QDataStream &stream)
     {
         qreal aSize;
-        dataStream >> aSize;
-        ui_->mainConsole->setTextFontSize(aSize);
-        break;
+        stream >> aSize;
+        window.ui_->mainConsole->setTextFontSize(aSize);
     }
-    case C_CONSOLE_REQUEST_LINE:
+
+    static void requestLine(MainWindow &window, QDataStream &stream)
     {
         QString prompt;
-        dataStream >> prompt;
-        beginReadRawlineWithPrompt(prompt);
-        break;
+        stream >> prompt;
+        window.beginReadRawlineWithPrompt(prompt);
     }
-    case C_CONSOLE_REQUEST_CHAR:
-        beginReadChar();
-        break;
-    case C_CONSOLE_BEGIN_EDIT_TEXT:
+
+    static void requestChar(MainWindow &window, QDataStream &)
     {
+        window.beginReadChar();
+    }
+
+    static void beginEditText(MainWindow &window, QDataStream &stream)
+    {
+        QString title;
         QString startingText;
-        dataStream >> startingText;
-        openEditorWindow(startingText);
-        break;
+        stream >> title >> startingText;
+        window.openEditorWindow(title, startingText);
     }
-    case C_CONSOLE_TEXT_CURSOR_POS:
+
+    static void textCursorPos(MainWindow &window, QDataStream &)
     {
-        sendConsoleCursorPosition();
-        break;
+        window.sendConsoleCursorPosition();
     }
-    case C_CONSOLE_SET_TEXT_CURSOR_POS:
+
+    static void setTextCursorPos(MainWindow &window, QDataStream &stream)
     {
         int row, col;
-        dataStream >> row >> col;
-        ui_->mainConsole->setTextCursorPosition(row, col);
-        break;
+        stream >> row >> col;
+        window.ui_->mainConsole->setTextCursorPosition(row, col);
     }
-    case C_CONSOLE_SET_CURSOR_MODE:
+
+    static void setCursorMode(MainWindow &window, QDataStream &stream)
     {
         bool mode;
-        dataStream >> mode;
-        ui_->mainConsole->setOverwriteMode(mode);
-        break;
+        stream >> mode;
+        window.ui_->mainConsole->setOverwriteMode(mode);
     }
-    case C_CONSOLE_SET_TEXT_COLOR:
+
+    static void setTextColor(MainWindow &window, QDataStream &stream)
     {
         QColor foreground;
         QColor background;
-        dataStream >> foreground >> background;
-        ui_->mainConsole->setTextFontColor(foreground, background);
-        break;
+        stream >> foreground >> background;
+        window.ui_->mainConsole->setTextFontColor(foreground, background);
     }
-    case C_CONSOLE_CLEAR_SCREEN_TEXT:
-        ui_->mainConsole->setPlainText("");
-        break;
-    case C_CANVAS_UPDATE_TURTLE_POS:
+
+    static void clearScreenText(MainWindow &window, QDataStream &)
+    {
+        window.ui_->mainConsole->setPlainText("");
+    }
+
+    static void updateTurtlePos(MainWindow &window, QDataStream &stream)
     {
         QTransform matrix;
-        dataStream >> matrix;
-        ui_->mainCanvas->setTurtleMatrix(matrix);
-        introduceCanvas();
-        break;
+        stream >> matrix;
+        window.ui_->mainCanvas->setTurtleMatrix(matrix);
+        window.introduceCanvas();
     }
-    case C_CANVAS_SET_TURTLE_IS_VISIBLE:
+
+    static void setTurtleIsVisible(MainWindow &window, QDataStream &stream)
     {
         bool isVisible;
-        dataStream >> isVisible;
-        ui_->mainCanvas->setTurtleIsVisible(isVisible);
-        introduceCanvas();
-        break;
+        stream >> isVisible;
+        window.ui_->mainCanvas->setTurtleIsVisible(isVisible);
+        window.introduceCanvas();
     }
-    case C_CANVAS_EMIT_VERTEX:
+
+    static void emitVertex(MainWindow &window, QDataStream &)
     {
-        ui_->mainCanvas->emitVertex();
-        introduceCanvas();
-        break;
+        window.ui_->mainCanvas->emitVertex();
+        window.introduceCanvas();
     }
-    case C_CANVAS_SET_FOREGROUND_COLOR:
-    {
-        QColor color;
-        dataStream >> color;
-        ui_->mainCanvas->setForegroundColor(color);
-        introduceCanvas();
-        break;
-    }
-    case C_CANVAS_SET_BACKGROUND_COLOR:
+
+    static void setForegroundColor(MainWindow &window, QDataStream &stream)
     {
         QColor color;
-        dataStream >> color;
-        ui_->mainCanvas->setBackgroundColor(color);
-        introduceCanvas();
-        break;
+        stream >> color;
+        window.ui_->mainCanvas->setForegroundColor(color);
+        window.introduceCanvas();
     }
-    case C_CANVAS_SET_BACKGROUND_IMAGE:
+
+    static void setBackgroundColor(MainWindow &window, QDataStream &stream)
+    {
+        QColor color;
+        stream >> color;
+        window.ui_->mainCanvas->setBackgroundColor(color);
+        window.introduceCanvas();
+    }
+
+    static void setBackgroundImage(MainWindow &window, QDataStream &stream)
     {
         QImage image;
-        dataStream >> image;
-        ui_->mainCanvas->setBackgroundImage(image);
-        introduceCanvas();
-        break;
+        stream >> image;
+        window.ui_->mainCanvas->setBackgroundImage(image);
+        window.introduceCanvas();
     }
-    case C_CANVAS_BEGIN_POLYGON:
+
+    static void beginPolygon(MainWindow &window, QDataStream &stream)
     {
         QColor color;
-        dataStream >> color;
-        ui_->mainCanvas->beginPolygon(color);
-        break;
+        stream >> color;
+        window.ui_->mainCanvas->beginPolygon(color);
     }
-    case C_CANVAS_END_POLYGON:
+
+    static void endPolygon(MainWindow &window, QDataStream &)
     {
-        ui_->mainCanvas->endPolygon();
-        break;
+        window.ui_->mainCanvas->endPolygon();
     }
-    case C_CANVAS_CLEAR_SCREEN:
-        ui_->mainCanvas->clearScreen();
-        introduceCanvas();
-        break;
-    case C_CANVAS_SETBOUNDS:
+
+    static void clearScreen(MainWindow &window, QDataStream &)
+    {
+        window.ui_->mainCanvas->clearScreen();
+        window.introduceCanvas();
+    }
+
+    static void setBounds(MainWindow &window, QDataStream &stream)
     {
         qreal x, y;
-        dataStream >> x >> y;
-        ui_->mainCanvas->setBounds(x, y);
-        break;
+        stream >> x >> y;
+        window.ui_->mainCanvas->setBounds(x, y);
     }
-    case C_CANVAS_SET_IS_BOUNDED:
+
+    static void setIsBounded(MainWindow &window, QDataStream &stream)
     {
         bool isBounded;
-        dataStream >> isBounded;
-        ui_->mainCanvas->setIsBounded(isBounded);
-        break;
+        stream >> isBounded;
+        window.ui_->mainCanvas->setIsBounded(isBounded);
     }
-    case C_CANVAS_SET_FONT_NAME:
+
+    static void setLabelFontName(MainWindow &window, QDataStream &stream)
     {
         QString name;
-        dataStream >> name;
-        ui_->mainCanvas->setLabelFontName(name);
-        break;
+        stream >> name;
+        window.ui_->mainCanvas->setLabelFontName(name);
     }
-    case C_CANVAS_SET_FONT_SIZE:
+
+    static void setLabelFontSize(MainWindow &window, QDataStream &stream)
     {
         qreal aSize;
-        dataStream >> aSize;
-        ui_->mainCanvas->setLabelFontSize(aSize);
-        break;
+        stream >> aSize;
+        window.ui_->mainCanvas->setLabelFontSize(aSize);
     }
-    case C_CANVAS_DRAW_LABEL:
+
+    static void drawLabel(MainWindow &window, QDataStream &stream)
     {
         QString aString;
-        dataStream >> aString;
-        ui_->mainCanvas->addLabel(aString);
-        introduceCanvas();
-        break;
+        stream >> aString;
+        window.ui_->mainCanvas->addLabel(aString);
+        window.introduceCanvas();
     }
-    case C_CANVAS_DRAW_ARC:
+
+    static void drawArc(MainWindow &window, QDataStream &stream)
     {
         qreal angle;
         qreal radius;
-        dataStream >> angle >> radius;
-        ui_->mainCanvas->addArc(angle, radius);
-        introduceCanvas();
-        break;
+        stream >> angle >> radius;
+        window.ui_->mainCanvas->addArc(angle, radius);
+        window.introduceCanvas();
     }
-    case C_CANVAS_SET_PENSIZE:
+
+    static void setPensize(MainWindow &window, QDataStream &stream)
     {
         qreal newSize;
-        dataStream >> newSize;
-        ui_->mainCanvas->setPensize(newSize);
-        break;
+        stream >> newSize;
+        window.ui_->mainCanvas->setPensize(newSize);
     }
-    case C_CANVAS_SET_PENMODE:
+
+    static void setPenmode(MainWindow &window, QDataStream &stream)
     {
         PenModeEnum newMode;
-        dataStream >> newMode;
-        ui_->mainCanvas->setPenmode(newMode);
-        break;
+        stream >> newMode;
+        window.ui_->mainCanvas->setPenmode(newMode);
     }
-    case C_CANVAS_SET_PENUPDOWN:
+
+    static void setPenUpDown(MainWindow &window, QDataStream &stream)
     {
         bool penIsDown;
-        dataStream >> penIsDown;
-        ui_->mainCanvas->setPenIsDown(penIsDown);
-        break;
+        stream >> penIsDown;
+        window.ui_->mainCanvas->setPenIsDown(penIsDown);
     }
-    case C_CANVAS_GET_IMAGE:
+
+    static void setPenPattern(MainWindow &window, QDataStream &stream)
     {
-        sendCanvasImage();
-        break;
+        Qt::PenStyle style;
+        Qt::PenCapStyle cap;
+        Qt::PenJoinStyle join;
+        QList<qreal> dashPattern;
+        stream >> style >> cap >> join >> dashPattern;
+        window.ui_->mainCanvas->setPenPattern(style, cap, join, dashPattern);
     }
-    case C_CANVAS_GET_SVG:
+
+    static void setScrunch(MainWindow &window, QDataStream &stream)
     {
-        sendCanvasSvg();
-        break;
+        qreal x, y;
+        stream >> x >> y;
+        window.ui_->mainCanvas->setScrunch(x, y);
+        window.introduceCanvas();
     }
-    default:
+
+    static void getImage(MainWindow &window, QDataStream &)
+    {
+        window.sendCanvasImage();
+    }
+
+    static void getSvg(MainWindow &window, QDataStream &)
+    {
+        window.sendCanvasSvg();
+    }
+
+    static const std::array<Handler, count> &handlers()
+    {
+        static const std::array<Handler, count> table = [] {
+            std::array<Handler, count> handlers{};
+            handlers[W_ZERO] = zero;
+            handlers[W_INITIALIZE] = initialize;
+            handlers[W_CLOSE_PIPE] = closePipe;
+            handlers[W_SET_SCREENMODE] = setScreenMode;
+            handlers[W_FILE_DIALOG_GET_PATH] = fileDialog;
+            handlers[W_TIMER_START] = timerStart;
+            handlers[C_CONSOLE_PRINT_STRING] = printString;
+            handlers[C_CONSOLE_SET_FONT_NAME] = setConsoleFontName;
+            handlers[C_CONSOLE_SET_FONT_SIZE] = setConsoleFontSize;
+            handlers[C_CONSOLE_REQUEST_LINE] = requestLine;
+            handlers[C_CONSOLE_REQUEST_CHAR] = requestChar;
+            handlers[C_CONSOLE_BEGIN_EDIT_TEXT] = beginEditText;
+            handlers[C_CONSOLE_TEXT_CURSOR_POS] = textCursorPos;
+            handlers[C_CONSOLE_SET_TEXT_CURSOR_POS] = setTextCursorPos;
+            handlers[C_CONSOLE_SET_CURSOR_MODE] = setCursorMode;
+            handlers[C_CONSOLE_SET_TEXT_COLOR] = setTextColor;
+            handlers[C_CONSOLE_CLEAR_SCREEN_TEXT] = clearScreenText;
+            handlers[C_CANVAS_UPDATE_TURTLE_POS] = updateTurtlePos;
+            handlers[C_CANVAS_SET_TURTLE_IS_VISIBLE] = setTurtleIsVisible;
+            handlers[C_CANVAS_EMIT_VERTEX] = emitVertex;
+            handlers[C_CANVAS_SET_FOREGROUND_COLOR] = setForegroundColor;
+            handlers[C_CANVAS_SET_BACKGROUND_COLOR] = setBackgroundColor;
+            handlers[C_CANVAS_SET_BACKGROUND_IMAGE] = setBackgroundImage;
+            handlers[C_CANVAS_BEGIN_POLYGON] = beginPolygon;
+            handlers[C_CANVAS_END_POLYGON] = endPolygon;
+            handlers[C_CANVAS_CLEAR_SCREEN] = clearScreen;
+            handlers[C_CANVAS_SETBOUNDS] = setBounds;
+            handlers[C_CANVAS_SET_IS_BOUNDED] = setIsBounded;
+            handlers[C_CANVAS_SET_FONT_NAME] = setLabelFontName;
+            handlers[C_CANVAS_SET_FONT_SIZE] = setLabelFontSize;
+            handlers[C_CANVAS_DRAW_LABEL] = drawLabel;
+            handlers[C_CANVAS_DRAW_ARC] = drawArc;
+            handlers[C_CANVAS_SET_PENSIZE] = setPensize;
+            handlers[C_CANVAS_SET_PENMODE] = setPenmode;
+            handlers[C_CANVAS_SET_PENUPDOWN] = setPenUpDown;
+            handlers[C_CANVAS_SET_PENPATTERN] = setPenPattern;
+            handlers[C_CANVAS_SET_SCRUNCH] = setScrunch;
+            handlers[C_CANVAS_GET_IMAGE] = getImage;
+            handlers[C_CANVAS_GET_SVG] = getSvg;
+            return handlers;
+        }();
+        return table;
+    }
+};
+
+void MainWindow::processReadBuffer()
+{
+    QDataStream dataStream(readBuffer_);
+    message_t header;
+    dataStream >> header;
+
+    const MessageDispatch::Handler handler = MessageDispatch::handlers()[header];
+    if (handler == nullptr)
+    {
         qInfo() << "was not expecting" << header;
-        break;
+        return;
     }
+    handler(*this, dataStream);
 }
 
 void MainWindow::setSplitterforMode(ScreenModeEnum mode)
 {
-    float canvasSize, consoleSize;
+    float canvasSize = 0;
     switch (mode)
     {
     case initScreenMode:
@@ -1040,71 +799,71 @@ void MainWindow::setSplitterforMode(ScreenModeEnum mode)
     QList<int> sizes = ui_->splitter->sizes();
     float splitterSize = sizes[0] + sizes[1];
     canvasSize = canvasSize * splitterSize;
-    consoleSize = splitterSize - canvasSize;
-    ui_->splitter->setSizes(QList<int>() << (int)canvasSize << (int)consoleSize);
+    const float consoleSize = splitterSize - canvasSize;
+    ui_->splitter->setSizes({qRound(canvasSize), qRound(consoleSize)});
 }
 
 void MainWindow::readStandardError()
 {
-    QByteArray ary = logoProcess->readAllStandardError();
+    QByteArray ary = logoProcess_.readAllStandardError();
     qInfo() << "stderr: " << QString(ary);
 }
 
 void MainWindow::beginReadRawlineWithPrompt(const QString &prompt)
 {
-    windowMode_ = windowMode_waitForRawline;
+    windowMode_ = windowMode_t::windowMode_waitForRawline;
     ui_->mainConsole->requestRawlineWithPrompt(prompt);
 }
 
 void MainWindow::beginReadChar()
 {
-    windowMode_ = windowMode_waitForChar;
+    windowMode_ = windowMode_t::windowMode_waitForChar;
     ui_->mainConsole->requestChar();
 }
 
 void MainWindow::mouseclickedSlot(QPointF position, int buttonID)
 {
-    message(C_CANVAS_MOUSE_BUTTON_DOWN) << position << buttonID;
+    sendMessage(C_CANVAS_MOUSE_BUTTON_DOWN, position, buttonID);
 }
 
 void MainWindow::mousemovedSlot(QPointF position)
 {
-    message(C_CANVAS_MOUSE_MOVED) << position;
+    sendMessage(C_CANVAS_MOUSE_MOVED, position);
 }
 
 void MainWindow::mousereleasedSlot()
 {
-    message(C_CANVAS_MOUSE_BUTTON_UP);
+    sendMessage(C_CANVAS_MOUSE_BUTTON_UP);
 }
 
 void MainWindow::sendCharSlot(QChar c)
 {
-    message(C_CONSOLE_CHAR_READ) << c;
+    windowMode_ = windowMode_t::windowMode_noWait;
+    sendMessage(C_CONSOLE_CHAR_READ, c);
 }
 
 void MainWindow::sendRawlineSlot(const QString &line)
 {
-    message(C_CONSOLE_RAWLINE_READ) << line;
+    windowMode_ = windowMode_t::windowMode_noWait;
+    sendMessage(C_CONSOLE_RAWLINE_READ, line);
 }
 
 void MainWindow::sendConsoleCursorPosition()
 {
-    int row = 0;
-    int col = 0;
-    ui_->mainConsole->getCursorPos(row, col);
-    message(C_CONSOLE_TEXT_CURSOR_POS) << row << col;
+    const auto [row, col] = ui_->mainConsole->getCursorPos();
+    sendMessage(C_CONSOLE_TEXT_CURSOR_POS, row, col);
 }
 
 void MainWindow::sendCanvasImage()
 {
     QImage image(ui_->mainCanvas->getImage());
-    message(C_CANVAS_GET_IMAGE) << image;
+    sendMessage(C_CANVAS_GET_IMAGE, image);
 }
 
 void MainWindow::sendCanvasSvg()
 {
     QByteArray svg = ui_->mainCanvas->getSvg();
-    message(C_CANVAS_GET_SVG) << svg;
+    sendMessage(C_CANVAS_GET_SVG, svg);
 }
 
 void MainWindow::splitterHasMovedSlot(int, int)
