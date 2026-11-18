@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(QLogo VERSION 1.0 LANGUAGES CXX C)
+project(QLogo VERSION 1.01 LANGUAGES CXX C)
 
 include(GNUInstallDirs)
 
@@ -35,13 +35,15 @@ if(NOT QLOGO_CSLS_FILES)
     message(FATAL_ERROR "No CSLS files found in ${QLOGO_CSLS_SRC}")
 endif()
 
-execute_process(
-    COMMAND git describe --tags
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    OUTPUT_VARIABLE QLOGO_VERSION
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-)
+if(NOT QLOGO_VERSION)
+    execute_process(
+        COMMAND git describe --tags
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE QLOGO_VERSION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+endif()
 if(NOT QLOGO_VERSION)
     set(QLOGO_VERSION "unknown")
 endif()

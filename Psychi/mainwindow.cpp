@@ -71,6 +71,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui_(std::make_uni
 
 void MainWindow::show()
 {
+    setSplitterforMode(initScreenMode);
+
     QMainWindow::show();
     ui_->mainConsole->setFocus();
 
@@ -151,6 +153,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
     // Because when the process dies another signal will be sent to close the application.
     if (pid > 0)
     {
+        userRequestedClose_ = true;
         sendMessage(S_SYSTEM);
 
         logoProcess_.closeWriteChannel();
@@ -395,7 +398,7 @@ void MainWindow::introduceCanvas()
 
 void MainWindow::processFinished(int exitCode, QProcess::ExitStatus exitStatus)
 {
-    if (exitStatus != QProcess::NormalExit)
+    if (exitStatus != QProcess::NormalExit && !userRequestedClose_)
     {
         QMessageBox msgBox;
         msgBox.setText(tr("qlogo has reached an unstable state and will be terminated."));
@@ -798,6 +801,8 @@ void MainWindow::setSplitterforMode(ScreenModeEnum mode)
     }
     QList<int> sizes = ui_->splitter->sizes();
     float splitterSize = sizes[0] + sizes[1];
+    if (splitterSize <= 0)
+        splitterSize = 1000;
     canvasSize = canvasSize * splitterSize;
     const float consoleSize = splitterSize - canvasSize;
     ui_->splitter->setSizes({qRound(canvasSize), qRound(consoleSize)});
