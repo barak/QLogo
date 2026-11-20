@@ -12,7 +12,7 @@ Build-Depends: debhelper-compat (= 14),
 	qt6-svg-dev,
 	llvm-22-dev,
 	libncurses-dev,
-	libqt6sql6-sqlite <!nocheck>,
+	libqt6sql6-sqlite,
 
 Package: qlogo
 Architecture: any
